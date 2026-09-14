@@ -8,6 +8,7 @@ from canterlot.exceptions import (
     ClubNotFoundError,
     DirectInviteIdentityMismatchError,
     InvalidInviteTokenError,
+    InviteEmailAlreadyRegisteredError,
     InviteLinkDeactivatedError,
     UnauthorizedClubMemberError,
 )
@@ -81,6 +82,7 @@ class InviteService:
         self,
         invite_id: str,
         user_email: NormalizedEmailStr | None = None,
+        user_id: PydanticObjectId | None = None,
         invited_by: UsernameStr | None = None,
     ) -> InviteValidationResult:
         log = logger.bind(invite_id=invite_id, target_email=user_email)
@@ -103,7 +105,7 @@ class InviteService:
             raise ClubNotFoundError("Target club does not exist.")
 
         is_direct = invite.type == InviteType.DIRECT
-        self.__assert_direct_identity_matches(invite, is_direct, user_email, log)
+        self.__assert_direct_identity_matches(invite, is_direct, user_email, user_id, log)
         inviter_username = await self.__resolve_inviter_username(invite, invited_by)
 
         log.info("Entry ticket criteria passed, staging domain context results metadata")
@@ -124,12 +126,22 @@ class InviteService:
         invite: InviteModel,
         is_direct: bool,
         user_email: NormalizedEmailStr | None,
+        user_id: PydanticObjectId | None,
         log,
     ) -> None:
-        if is_direct and (not user_email or invite.target_email != user_email):
+        if not is_direct:
+            return
+
+        if invite.target_email is not None:
+            matches = bool(user_email) and invite.target_email == user_email
+        else:
+            matches = bool(user_id) and invite.target_user_id == user_id
+
+        if not matches:
             log.warning(
                 "Security Alert: Identity mismatch during direct admission attempt",
                 expected_email=invite.target_email,
+                expected_user_id=str(invite.target_user_id) if invite.target_user_id else None,
             )
             raise DirectInviteIdentityMismatchError("This invite belongs to another user.")
 
@@ -179,6 +191,13 @@ class InviteService:
         log.info("Issuing secure identity-bound direct invite key")
 
         await self.__verify_privileged_role(club_id=club_id, user_id=issuer_id)
+
+        if await self.__user_repo.exists_by_email(target_email):
+            log.warning("Invite creation rejected: target email already belongs to a registered account")
+            raise InviteEmailAlreadyRegisteredError(
+                "This email already belongs to a registered account. Invite that person by username instead.",
+            )
+
         await self.__invite_repo.deactivate_all_direct_by_club_id_and_target_email(club_id, target_email)
 
         now = datetime.now(UTC)

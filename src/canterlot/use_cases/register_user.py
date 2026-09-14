@@ -44,8 +44,8 @@ class RegisterUserUseCase:
         if payload.invite_id:
             validated_invite = await self.__invite_service.validate_incoming_invite(
                 payload.invite_id,
-                payload.email,
-                payload.invited_by,
+                user_email=payload.email,
+                invited_by=payload.invited_by,
             )
             inviter_username = validated_invite.invited_by or payload.invited_by
 

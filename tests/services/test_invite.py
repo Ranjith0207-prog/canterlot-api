@@ -8,6 +8,7 @@ from canterlot.exceptions import (
     ClubNotFoundError,
     DirectInviteIdentityMismatchError,
     InvalidInviteTokenError,
+    InviteEmailAlreadyRegisteredError,
     InviteLinkDeactivatedError,
     UnauthorizedClubMemberError,
 )
@@ -217,6 +218,61 @@ def describe_validate_incoming_invite():
 
         assert result.is_direct is True
 
+    async def it_accepts_a_username_bound_direct_invite_with_a_matching_user_id(
+        invite_repo: AsyncMock,
+        club_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        invite_repo.find_by_id.return_value = InviteFactory.build(
+            is_active=True,
+            expires_at=None,
+            type=InviteType.DIRECT,
+            target_email=None,
+            target_user_id=SOME_TARGET_USER_ID,
+        )
+        club_repo.find_club_name_by_id.return_value = "Book Club"
+        service = InviteService(invite_repo, club_repo, user_repo)
+
+        result = await service.validate_incoming_invite("some-id", user_id=SOME_TARGET_USER_ID)
+
+        assert result.is_direct is True
+
+    async def it_raises_on_a_username_bound_invite_redeemed_by_a_different_user(
+        invite_repo: AsyncMock,
+        club_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        invite_repo.find_by_id.return_value = InviteFactory.build(
+            is_active=True,
+            expires_at=None,
+            type=InviteType.DIRECT,
+            target_email=None,
+            target_user_id=SOME_TARGET_USER_ID,
+        )
+        club_repo.find_club_name_by_id.return_value = "Book Club"
+        service = InviteService(invite_repo, club_repo, user_repo)
+
+        with pytest.raises(DirectInviteIdentityMismatchError):
+            await service.validate_incoming_invite("some-id", user_id=SOME_USER_ID)
+
+    async def it_raises_on_a_username_bound_invite_with_no_user_id_supplied(
+        invite_repo: AsyncMock,
+        club_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        invite_repo.find_by_id.return_value = InviteFactory.build(
+            is_active=True,
+            expires_at=None,
+            type=InviteType.DIRECT,
+            target_email=None,
+            target_user_id=SOME_TARGET_USER_ID,
+        )
+        club_repo.find_club_name_by_id.return_value = "Book Club"
+        service = InviteService(invite_repo, club_repo, user_repo)
+
+        with pytest.raises(DirectInviteIdentityMismatchError):
+            await service.validate_incoming_invite("some-id")
+
     async def it_accepts_a_public_invite_without_requiring_an_email(
         invite_repo: AsyncMock,
         club_repo: AsyncMock,
@@ -348,6 +404,7 @@ def describe_create_direct_invite():
         user_repo: AsyncMock,
     ):
         club_repo.find_member_role_by_club_id_and_user_id.return_value = MemberRole.OWNER
+        user_repo.exists_by_email.return_value = False
         invite_repo.save.return_value = InviteFactory.build(id="direct-invite-id", type=InviteType.DIRECT)
         service = InviteService(invite_repo, club_repo, user_repo)
 
@@ -358,6 +415,21 @@ def describe_create_direct_invite():
             SOME_CLUB_ID,
             "alice@example.com",
         )
+
+    async def it_raises_when_the_target_email_already_belongs_to_a_registered_account(
+        invite_repo: AsyncMock,
+        club_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        club_repo.find_member_role_by_club_id_and_user_id.return_value = MemberRole.OWNER
+        user_repo.exists_by_email.return_value = True
+        service = InviteService(invite_repo, club_repo, user_repo)
+
+        with pytest.raises(InviteEmailAlreadyRegisteredError):
+            await service.create_external_invite(SOME_CLUB_ID, SOME_USER_ID, "alice@example.com")
+
+        invite_repo.save.assert_not_called()
+        invite_repo.deactivate_all_direct_by_club_id_and_target_email.assert_not_called()
 
 
 def describe_create_internal_invite():

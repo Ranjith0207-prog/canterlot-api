@@ -28,6 +28,7 @@ class AcceptInviteUseCase:
         validated_invite = await self.__invite_service.validate_incoming_invite(
             invite_id=invite_id,
             user_email=current_user.email,
+            user_id=PydanticObjectId(current_user.id),
         )
 
         # ---------------------------------------------------------

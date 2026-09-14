@@ -50,6 +50,7 @@ def describe_accept_invite_use_case():
         invite_service.validate_incoming_invite.assert_awaited_once_with(
             invite_id="invite-token-123",
             user_email=user.email,
+            user_id=user.id,
         )
         club_service.admit_user.assert_awaited_once_with(
             club_id=SOME_CLUB_ID,
