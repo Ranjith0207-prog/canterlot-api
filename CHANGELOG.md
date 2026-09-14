@@ -2,6 +2,22 @@
 
 <!-- version list -->
 
+## v0.5.0 (2026-09-14)
+
+### Bug Fixes
+
+- **clubs**: Allow username-bound invites to be redeemed and block duplicate email invites
+  ([`a6beb47`](https://github.com/alexbeldam/canterlot-api/commit/a6beb47205eada773cf1b060cfdf77ab692ec054))
+
+- **clubs**: Set Location header on ownership transfer creation
+  ([`2858bca`](https://github.com/alexbeldam/canterlot-api/commit/2858bca8be57e26b545f9f306c265c5c951afa5d))
+
+### Features
+
+- **books**: Add ratings, reading history, and paginated read-books endpoints
+  ([`7966d6c`](https://github.com/alexbeldam/canterlot-api/commit/7966d6cc3deb496f6611acde962d5b353799d528))
+
+
 ## v0.4.1 (2026-09-04)
 
 ### Bug Fixes
