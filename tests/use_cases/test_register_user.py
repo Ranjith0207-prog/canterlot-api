@@ -130,8 +130,8 @@ def describe_register_user_use_case():
 
         invite_service.validate_incoming_invite.assert_awaited_once_with(
             "invite-token-abc",
-            "twilight@canterlot.dev",
-            "celestia",
+            user_email="twilight@canterlot.dev",
+            invited_by="celestia",
         )
         auth_service.register_user.assert_awaited_once_with(payload, "celestia_override")
         club_service.admit_user.assert_awaited_once_with(

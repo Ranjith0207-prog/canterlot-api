@@ -23,3 +23,8 @@ class DirectInviteIdentityMismatchError(UnauthorizedClubMemberError):
 class InviteRecipientSuppressedError(BusinessError):
     error_code = ErrorCode.INVITE_RECIPIENT_SUPPRESSED
     status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
+
+
+class InviteEmailAlreadyRegisteredError(BusinessError):
+    error_code = ErrorCode.INVITE_EMAIL_ALREADY_REGISTERED
+    status_code = status.HTTP_409_CONFLICT

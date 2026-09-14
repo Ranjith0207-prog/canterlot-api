@@ -45,7 +45,12 @@ from .club import (
     UnauthorizedClubMemberError,
 )
 from .gateway import GatewayConfigurationError
-from .invite import DirectInviteIdentityMismatchError, InvalidInviteTokenError, InviteLinkDeactivatedError
+from .invite import (
+    DirectInviteIdentityMismatchError,
+    InvalidInviteTokenError,
+    InviteEmailAlreadyRegisteredError,
+    InviteLinkDeactivatedError,
+)
 from .rate_limit import RateLimitExceededError
 from .user import StaleLegalVersionError, UserDomainError, UserNotFoundError
 
@@ -76,6 +81,7 @@ __all__ = [
     "InvalidCredentialsError",
     "InvalidInviteTokenError",
     "InvalidOAuthCredentialError",
+    "InviteEmailAlreadyRegisteredError",
     "InviteLinkDeactivatedError",
     "LastAuthenticationMethodError",
     "MemberBannedError",
