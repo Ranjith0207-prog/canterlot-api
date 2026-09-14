@@ -30,20 +30,19 @@
 
 <h2 id="about-the-project">📖 About the Project</h2>
 
-**CanterlotAPI** is the backend engine for a modern book club management app. Today it covers club creation and administration, member invitations and management with a role hierarchy, a collaborative catalog of book suggestions, and each user's account/profile (password, Google, or Gravatar authentication, email verification, password changes and resets, and a personal reading history).
+**CanterlotAPI** is the backend engine for a modern book club management app: club creation and administration, a role-based member hierarchy, invitations, a collaborative catalog of book suggestions, full reading-round orchestration (candidate selection, voting or random draw, and progress tracking), and each user's account and profile (password, Google, or Gravatar authentication, email verification, and a personal reading history).
 
-Orchestrating reading rounds themselves (ranked voting or random draw) is **planned, but not yet implemented** -- see the [Roadmap](#roadmap) below for what's already designed but not yet built.
-
-The full interactive API reference (Swagger UI) lives at [`/docs`](https://api.canterlot.com.br/docs).
+The full interactive API reference (Swagger UI) lives at [`/docs`](https://api.canterlot.com.br/docs); a static endpoint map and the cross-cutting business rules behind it live on the [wiki](../../wiki).
 
 <h2 id="how-it-works">🧠 How It Works</h2>
 
-The system is guided by two already-implemented business-rule pillars that manage how readers coexist within a club:
+Three pillars govern how readers coexist within a club:
 
-- **Concurrent, Hierarchical Access Control:** Every club workspace has well-defined roles (`OWNER`, `ADMIN`, `MEMBER`). Administrative actions -- role management, member removal/banning, ownership transfer -- follow a strict chain of command: an `ADMIN` can never act on another `ADMIN` or the `OWNER`, shielding the club from unauthorized actions.
-- **Autonomous Admission Management:** New members join through invites issued by the club -- a public link (rotatable at any time) or a direct email invite. Admins retain full control over the flow of new members, including manual approval for restricted clubs and banning.
+- **Hierarchical Access Control:** every club workspace has well-defined roles (`OWNER`, `ADMIN`, `MEMBER`) governing who can manage membership, roles, and ownership.
+- **Admission Management:** new members join through invites issued by the club, a rotatable public link or a direct invite, with admin approval and banning available for restricted clubs.
+- **Reading Round Orchestration:** a collaborative catalog of book suggestions feeds into round-based deliberation (curated voting or random draw) and per-member progress tracking.
 
-Orchestrating reading sessions (curation -> deliberation -> progress tracking) is the next planned pillar -- the collaborative catalog already exists today as the curation step; deliberation (voting/draw) and progress tracking haven't been built yet (see [Roadmap](#roadmap)).
+See the [wiki](../../wiki) for the specific rules behind each pillar and its current implementation status.
 
 ---
 
@@ -92,15 +91,7 @@ All project management is centralized through `just`. You don't need to manually
 
 <h2 id="roadmap">🗺️ Roadmap</h2>
 
-Features with business rules already designed, but **not yet implemented**:
-
-- **Reading Sessions & Voting:** the full reading-round cycle -- starting a round (automatic draw or curated pool), member-weighted voting, individual progress tracking, and round completion/cancellation.
-- **Changing an account's email:** signup email confirmation and password reset already exist -- changing to a different email address on an existing account doesn't yet.
-- **Browsable reading history:** querying (paginated) and removing entries from the personal reading history -- today you can only add to it.
-- **Log out of all devices:** ending every active session at once, as a deliberate action independent of a password change.
-- **Automatic reading-deadline reminders:** an email notification a day before and on the day of a round's deadline, triggered by an external cron.
-
-Linking external social bridges (Discord/WhatsApp) was considered, but **rejected**: there's currently no way to verify that a link a club admin sends actually leads to appropriate content, and without a moderation team, the risk of abuse (inappropriate content, malware, spam) was considered unacceptable.
+For a full breakdown of what's built, partially built, or not yet started across every domain, see the [Progress and Roadmap](../../wiki/Progress-and-Roadmap) wiki page.
 
 ---
 
