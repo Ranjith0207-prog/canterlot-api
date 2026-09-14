@@ -29,8 +29,7 @@ jobs:
         id: gate-hash
         run: |
           set -o pipefail
-          FILES_TO_HASH=$(find src/ tests/ tools/ pyproject.toml uv.lock justfile -type f 2>/dev/null || true)
-          HASH=$(echo "$FILES_TO_HASH" | sort | md5sum | awk '{print $1}')
+          HASH=$(find src/ tests/ tools/ pyproject.toml uv.lock justfile -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum | awk '{print $1}')
           echo "cache-key=quality-gate-$HASH" >> $GITHUB_OUTPUT
 
       - name: Verify Quality Gate Cache State
