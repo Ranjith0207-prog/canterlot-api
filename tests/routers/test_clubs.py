@@ -759,6 +759,7 @@ def describe_create_ownership_transfer():
 
         assert response.status_code == 201
         assert response.json()["reclaim_deadline"] == "2026-07-13T12:00:00Z"
+        assert response.headers["Location"] == f"/v1/clubs/{SOME_CLUB_SLUG}/ownership-transfers/current"
 
     def it_returns_400_when_the_target_is_the_caller(
         client: TestClient,
