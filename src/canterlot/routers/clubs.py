@@ -327,12 +327,17 @@ async def create_ownership_transfer(
     payload: OwnershipTransferRequest,
     current_user: Annotated[UserModel, Depends(get_current_user)],
     use_case: Annotated[TransferClubOwnershipUseCase, Depends(get_transfer_club_ownership_use_case)],
+    response: Response,
 ) -> OwnershipTransferResponse:
-    return await use_case.execute(
+    result = await use_case.execute(
         club=club,
         current_owner=current_user,
         payload=payload,
     )
+
+    response.headers["Location"] = f"/v1/clubs/{club.slug}/ownership-transfers/current"
+
+    return result
 
 
 @router.delete(
