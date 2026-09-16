@@ -1,0 +1,70 @@
+name: "Automation | Issue Assignment"
+
+on:
+  issues:
+    types: [opened]
+  issue_comment:
+    types: [created]
+
+jobs:
+  banner:
+    runs-on: ubuntu-latest
+    if: "github.event_name == 'issues'"
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const banner = "> Want to work on an issue? Leave a comment with `/assign` (or ask to be assigned) before starting work. Please wait for confirmation so multiple people don't work on the same thing!"
+            const { owner, repo } = context.repo
+            const issue_number = context.issue.number
+            const body = context.payload.issue.body || ""
+
+            await github.rest.issues.update({
+              owner,
+              repo,
+              issue_number,
+              body: `${banner}\n\n${body}`,
+            })
+            await core.summary.addRaw(`Prepended the assignment banner to #${issue_number}.`).write()
+
+  welcome:
+    runs-on: ubuntu-latest
+    if: "github.event_name == 'issue_comment' && !github.event.issue.pull_request && contains(github.event.comment.body, 'work on this')"
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: "Thanks for your interest! Please comment `/assign` to assign this issue to yourself before starting work to avoid duplicate effort."
+            })
+
+  assign:
+    runs-on: ubuntu-latest
+    if: "github.event_name == 'issue_comment' && !github.event.issue.pull_request && startsWith(github.event.comment.body, '/assign')"
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo
+            const issue_number = context.issue.number
+            const assignee = context.actor
+
+            const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number })
+
+            if (issue.assignees.length > 0) {
+              const names = issue.assignees.map((a) => `@${a.login}`).join(", ")
+              await core.summary.addRaw(`Skipped: #${issue_number} is already assigned to ${names}.`).write()
+              return
+            }
+
+            await github.rest.issues.addAssignees({ owner, repo, issue_number, assignees: [assignee] })
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body: `Assigned to @${assignee}. Thanks for picking this up!`,
+            })
+            await core.summary.addRaw(`Assigned #${issue_number} to @${assignee}.`).write()
