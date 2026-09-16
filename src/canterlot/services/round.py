@@ -17,6 +17,7 @@ from canterlot.models import BookModel, CatalogEntryModel, ClubModel, RatingStat
 from canterlot.models.round import CandidatePoolEntry, DeadlineDuration, RoundModel
 from canterlot.repositories import (
     BookRepository,
+    ClubMembershipRepository,
     ReadBookRepository,
     RoundCompletionRepository,
     RoundRepository,
@@ -25,7 +26,6 @@ from canterlot.types import (
     DeadlineType,
     DeadlineUnit,
     MemberRole,
-    MemberSchema,
     RoundResolutionMethod,
     RoundSelectionMode,
     RoundStatus,
@@ -39,10 +39,6 @@ from canterlot.utils.weighting import (
 )
 
 logger = get_logger(__name__)
-
-
-def _find_member(members: list[MemberSchema], user_id: PydanticObjectId) -> MemberSchema | None:
-    return next((m for m in members if m.user_id == user_id), None)
 
 
 def _add_duration(base: datetime, duration: DeadlineDuration) -> datetime:
@@ -67,12 +63,14 @@ class RoundService:
         book_repo: BookRepository,
         read_book_repo: ReadBookRepository,
         round_completion_repo: RoundCompletionRepository,
+        club_membership_repo: ClubMembershipRepository,
         rng: random.Random | None = None,
     ):
         self.__round_repo = round_repo
         self.__book_repo = book_repo
         self.__read_book_repo = read_book_repo
         self.__round_completion_repo = round_completion_repo
+        self.__club_membership_repo = club_membership_repo
         self.__rng = rng or random.Random()
 
     async def start_round(
@@ -89,14 +87,14 @@ class RoundService:
         )
         log.info("Initiating reading round creation")
 
-        self.__ensure_caller_is_owner_or_admin(club, caller_id, log, action="start a reading round")
-
         club_id = PydanticObjectId(club.id)
+        await self.__ensure_caller_is_owner_or_admin(club_id, caller_id, log, action="start a reading round")
+
         if await self.__round_repo.find_active_by_club_id(club_id) is not None:
             log.warning("Round creation rejected: club already has an active round")
             raise ActiveRoundAlreadyExistsError("This club already has an active reading round.")
 
-        current_member_ids = {member.user_id for member in club.members}
+        current_member_ids = set(await self.__club_membership_repo.find_active_member_ids_by_club_id(club_id))
         excluded_book_ids = await self.__round_completion_repo.find_majority_excluded_book_ids(
             club_id,
             current_member_ids,
@@ -125,7 +123,7 @@ class RoundService:
             return await self.__round_repo.save(round_)
 
         if payload.selection_mode == RoundSelectionMode.RANDOM:
-            weights = await self.__compute_weights(club, eligible, now)
+            weights = await self.__compute_weights(club, eligible, list(current_member_ids), now)
             book_id = weighted_random_draw(self.__rng, weights)
             _, deadline = _resolve_deadline_at_creation(payload.deadline, decided_immediately=True, now=now)
             round_ = RoundModel(
@@ -140,7 +138,7 @@ class RoundService:
             log.info("Random round decided immediately", book_id=str(book_id))
             return await self.__round_repo.save(round_)
 
-        weights = await self.__compute_weights(club, eligible, now)
+        weights = await self.__compute_weights(club, eligible, list(current_member_ids), now)
         pool_book_ids = select_top_n_pool(eligible, weights)
         deadline_duration, deadline = _resolve_deadline_at_creation(
             payload.deadline,
@@ -173,7 +171,8 @@ class RoundService:
         )
         log.info("Initiating reading round finalize")
 
-        self.__ensure_caller_is_owner_or_admin(club, caller_id, log, action="finalize a reading round")
+        club_id = PydanticObjectId(club.id)
+        await self.__ensure_caller_is_owner_or_admin(club_id, caller_id, log, action="finalize a reading round")
         round_ = await self.__get_finalizable_round(club, log)
 
         if resolution_method == RoundResolutionMethod.DRAW:
@@ -197,7 +196,8 @@ class RoundService:
         round_id = PydanticObjectId(round_.id)
         pool_book_ids = {entry.book_id for entry in round_.candidate_pool}
         pool_entries = [entry for entry in club.catalog if entry.book_id in pool_book_ids]
-        weights = await self.__compute_weights(club, pool_entries, now)
+        member_ids = await self.__club_membership_repo.find_active_member_ids_by_club_id(PydanticObjectId(club.id))
+        weights = await self.__compute_weights(club, pool_entries, member_ids, now)
         book_id = weighted_random_draw(self.__rng, weights)
         deadline = _add_duration(now, round_.deadline_duration) if round_.deadline_duration else None
 
@@ -245,15 +245,15 @@ class RoundService:
 
         return RoundDisplay(book=book, pool_books=pool_books, rating_stats=rating_stats)
 
-    def __ensure_caller_is_owner_or_admin(
+    async def __ensure_caller_is_owner_or_admin(
         self,
-        club: ClubModel,
+        club_id: PydanticObjectId,
         caller_id: PydanticObjectId,
         log,
         action: str,
     ) -> None:
-        caller = _find_member(club.members, caller_id)
-        if caller is None or caller.role not in (MemberRole.OWNER, MemberRole.ADMIN):
+        caller_role = await self.__club_membership_repo.find_member_role_by_club_id_and_user_id(club_id, caller_id)
+        if caller_role is None or caller_role not in (MemberRole.OWNER, MemberRole.ADMIN):
             log.warning("Rejected: caller lacks OWNER/ADMIN privileges", action=action)
             raise UnauthorizedClubMemberError(f"Only an OWNER or ADMIN can {action}.")
 
@@ -261,10 +261,10 @@ class RoundService:
         self,
         club: ClubModel,
         entries: list[CatalogEntryModel],
+        member_ids: list[PydanticObjectId],
         now: datetime,
     ) -> dict[PydanticObjectId, float]:
         book_ids = [entry.book_id for entry in entries]
-        member_ids = [member.user_id for member in club.members]
 
         books_by_id = await self.__book_repo.find_by_ids(book_ids)
         rating_stats = await self.__read_book_repo.find_rating_stats_by_book_ids(book_ids)
@@ -274,7 +274,7 @@ class RoundService:
             entries=entries,
             preferred_languages=club.preferred_languages,
             familiarity_counts=familiarity_counts,
-            current_member_count=len(club.members),
+            current_member_count=len(member_ids),
             rating_stats_by_book=rating_stats,
             books_by_id=books_by_id,
             now=now,

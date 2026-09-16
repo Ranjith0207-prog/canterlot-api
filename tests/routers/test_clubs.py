@@ -24,12 +24,13 @@ from canterlot.exceptions import (
     UnauthorizedClubMemberError,
     UserNotFoundError,
 )
-from canterlot.models.club import ClubModel, MemberSchema, PendingApprovalSchema
+from canterlot.models.club import ClubModel
+from canterlot.models.club_membership import ClubMembershipModel
 from canterlot.models.user import AvatarSchema, UserModel
 from canterlot.pagination import Page
 from canterlot.services.club import ClubView
-from canterlot.types import AuthProviderName, MemberRole
-from tools.factories import BookFactory, ClubFactory, InviteTokenResponseFactory, UserFactory
+from canterlot.types import AuthProviderName, MemberRole, MembershipStatus
+from tools.factories import BookFactory, ClubFactory, ClubMembershipFactory, InviteTokenResponseFactory, UserFactory
 
 SOME_CLUB_ID = PydanticObjectId("507f1f77bcf86cd799439011")
 SOME_CLUB_SLUG = "book-club"
@@ -38,6 +39,8 @@ SOME_PENDING_ID = PydanticObjectId("507f1f77bcf86cd799439012")
 SOME_PENDING_USERNAME = "bob_2"
 SOME_TARGET_ID = PydanticObjectId("507f1f77bcf86cd799439013")
 SOME_TARGET_USERNAME = "carol_3"
+SOME_JOINED_AT = datetime(2026, 1, 1, tzinfo=UTC)
+SOME_REQUESTED_AT = datetime(2026, 1, 2, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -58,19 +61,39 @@ def _created_club() -> ClubModel:
     return ClubFactory.build(
         name="Book Club",
         slug="book-club",
-        members=[MemberSchema(user_id=SOME_OWNER_ID, role=MemberRole.OWNER)],
+    )
+
+
+def _owner_membership() -> ClubMembershipModel:
+    return ClubMembershipFactory.build(
+        club_id=SOME_CLUB_ID,
+        user_id=SOME_OWNER_ID,
+        status=MembershipStatus.OWNER,
+        joined_at=SOME_JOINED_AT,
+    )
+
+
+def _pending_membership() -> ClubMembershipModel:
+    return ClubMembershipFactory.build(
+        club_id=SOME_CLUB_ID,
+        user_id=SOME_PENDING_ID,
+        status=MembershipStatus.PENDING,
+        requested_at=SOME_REQUESTED_AT,
     )
 
 
 def _club_view(
     role: MemberRole,
+    pending: list[ClubMembershipModel] | None = None,
     pending_usernames: dict[PydanticObjectId, str] | None = None,
     club: ClubModel | None = None,
 ) -> ClubView:
     return ClubView(
         club=club or _created_club(),
+        members=[_owner_membership()],
         member_usernames={SOME_OWNER_ID: "alice_1"},
         viewer_role=role,
+        pending=pending,
         pending_usernames=pending_usernames,
     )
 
@@ -79,6 +102,7 @@ def describe_create_club():
     def it_creates_a_club_and_returns_it(client: TestClient, create_club_use_case: AsyncMock):
         create_club_use_case.execute.return_value = ClubResponse.from_model(
             _created_club(),
+            members=[_owner_membership()],
             user_usernames={SOME_OWNER_ID: "alice_1"},
         )
 
@@ -96,6 +120,7 @@ def describe_create_club():
     def it_does_not_leak_the_internal_object_id(client: TestClient, create_club_use_case: AsyncMock):
         create_club_use_case.execute.return_value = ClubResponse.from_model(
             _created_club(),
+            members=[_owner_membership()],
             user_usernames={SOME_OWNER_ID: "alice_1"},
         )
 
@@ -134,12 +159,10 @@ def describe_get_club():
         assert response.json()["error"]["error_code"] == "UNAUTHORIZED_CLUB_MEMBER"
 
     def it_includes_pending_approvals_for_an_owner(client: TestClient, club_service: AsyncMock):
-        club = _created_club()
-        club.pending_approvals = [PendingApprovalSchema(user_id=SOME_PENDING_ID)]
         club_service.get_club_view.return_value = _club_view(
             role=MemberRole.OWNER,
+            pending=[_pending_membership()],
             pending_usernames={SOME_PENDING_ID: "bob_2"},
-            club=club,
         )
 
         response = client.get(f"/v1/clubs/{SOME_CLUB_SLUG}")
@@ -150,7 +173,7 @@ def describe_get_club():
         assert "banned_users" not in body
 
     def it_includes_pending_approvals_for_an_admin(client: TestClient, club_service: AsyncMock):
-        club_service.get_club_view.return_value = _club_view(role=MemberRole.ADMIN, pending_usernames={})
+        club_service.get_club_view.return_value = _club_view(role=MemberRole.ADMIN, pending=[], pending_usernames={})
 
         response = client.get(f"/v1/clubs/{SOME_CLUB_SLUG}")
 
@@ -172,7 +195,12 @@ def describe_get_club():
         club = _created_club()
         club.ownership_transferred_at = datetime.now(UTC) - timedelta(hours=1)
         club.protected_former_owner_id = SOME_OWNER_ID
-        club_service.get_club_view.return_value = _club_view(role=MemberRole.OWNER, pending_usernames={}, club=club)
+        club_service.get_club_view.return_value = _club_view(
+            role=MemberRole.OWNER,
+            pending=[],
+            pending_usernames={},
+            club=club,
+        )
 
         response = client.get(f"/v1/clubs/{SOME_CLUB_SLUG}")
 
@@ -188,6 +216,7 @@ def describe_update_club_settings():
         updated = _created_club()
         updated.allow_suggestions = False
         club_service.update_settings.return_value = updated
+        club_service.get_active_members.return_value = [_owner_membership()]
         club_service.resolve_member_usernames.return_value = {SOME_OWNER_ID: "alice_1"}
 
         response = client.patch(f"/v1/clubs/{SOME_CLUB_SLUG}/settings", json={"allow_suggestions": False})
@@ -420,7 +449,12 @@ def describe_get_club_member():
     ):
         club_service.get_club_by_slug.return_value = _created_club()
         user_service.get_by_username.return_value = target_user
-        club_service.get_member_profile.return_value = MemberSchema(user_id=SOME_TARGET_ID, role=MemberRole.ADMIN)
+        club_service.get_member_profile.return_value = ClubMembershipFactory.build(
+            club_id=SOME_CLUB_ID,
+            user_id=SOME_TARGET_ID,
+            status=MembershipStatus.ADMIN,
+            joined_at=SOME_JOINED_AT,
+        )
 
         response = client.get(f"/v1/clubs/{SOME_CLUB_SLUG}/members/{SOME_TARGET_USERNAME}")
 

@@ -1,4 +1,4 @@
-from .base import BaseContextFactory, BaseDocumentFactory, BaseModelFactory, MemberFactory
+from .base import BaseContextFactory, BaseDocumentFactory, BaseModelFactory
 from .dto import (
     AccessTokenResponseFactory,
     BookDetailsFactory,
@@ -26,6 +26,7 @@ from .models import (
     BookFactory,
     CatalogEntryFactory,
     ClubFactory,
+    ClubMembershipFactory,
     EmailPreferencesFactory,
     InviteFactory,
     LinkCadidateFactory,
@@ -54,6 +55,7 @@ __all__ = [
     "CatalogEntryResponseFactory",
     "ClubCreateRequestFactory",
     "ClubFactory",
+    "ClubMembershipFactory",
     "ClubOnboardingFactory",
     "CreateInviteRequestFactory",
     "CreateSessionRequestFactory",
@@ -65,7 +67,6 @@ __all__ = [
     "LinkCadidateFactory",
     "LinkProviderRequestFactory",
     "LinkedProviderFactory",
-    "MemberFactory",
     "ReadBookFactory",
     "RegisterResponseFactory",
     "RoundCompletionFactory",

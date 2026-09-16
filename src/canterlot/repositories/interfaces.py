@@ -7,6 +7,7 @@ from beanie import PydanticObjectId
 from canterlot.models import (
     BookModel,
     CatalogEntryModel,
+    ClubMembershipModel,
     ClubModel,
     InviteModel,
     LinkedProviderSchema,
@@ -31,7 +32,6 @@ from canterlot.types import (
     JoinPolicy,
     LanguageStr,
     MemberRole,
-    MemberSchema,
     NormalizedEmailStr,
     PersonNameStr,
     UrlList,
@@ -65,24 +65,9 @@ class ClubRepository(Protocol):
     async def find_by_id(self, club_id: PydanticObjectId) -> ClubModel | None: ...
     async def find_club_name_by_id(self, club_id: PydanticObjectId) -> ClubNameStr | None: ...
     async def get_preferred_languages_by_id(self, club_id: PydanticObjectId) -> list[LanguageStr]: ...
-    async def find_member_role_by_club_id_and_user_id(
-        self,
-        club_id: PydanticObjectId,
-        user_id: PydanticObjectId,
-    ) -> MemberRole | None: ...
     async def find_by_slug(self, slug: ClubSlugStr) -> ClubModel | None: ...
     async def find_id_by_slug(self, slug: ClubSlugStr) -> PydanticObjectId | None: ...
     async def exists_by_club_slug(self, slug: ClubSlugStr) -> bool: ...
-    async def exists_by_club_id_and_member_user_id(
-        self,
-        club_id: PydanticObjectId,
-        user_id: PydanticObjectId,
-    ) -> bool: ...
-    async def exists_by_club_id_and_pending_user_id(
-        self,
-        club_id: PydanticObjectId,
-        user_id: PydanticObjectId,
-    ) -> bool: ...
     async def exists_by_club_id_and_catalog_book_id(
         self,
         club_id: PydanticObjectId,
@@ -104,20 +89,17 @@ class ClubRepository(Protocol):
         q: str | None = None,
     ) -> Page[CatalogEntryModel]: ...
     async def is_suggestions_allowed(self, club_id: PydanticObjectId) -> bool: ...
-    async def add_member(self, club_id: PydanticObjectId, member: MemberSchema) -> None: ...
-    async def remove_member(self, club_id: PydanticObjectId, member_id: PydanticObjectId) -> None: ...
-    async def remove_and_ban_member(self, club_id: PydanticObjectId, member_id: PydanticObjectId) -> None: ...
-    async def add_to_pending_approvals(self, club_id: PydanticObjectId, user_id: PydanticObjectId) -> None: ...
-    async def remove_from_pending_approvals(self, club_id: PydanticObjectId, user_id: PydanticObjectId) -> None: ...
-    async def remove_from_banned_users(self, club_id: PydanticObjectId, user_id: PydanticObjectId) -> None: ...
     async def add_to_catalog(self, club_id: PydanticObjectId, entry: CatalogEntryModel) -> None: ...
     async def remove_from_catalog(self, club_id: PydanticObjectId, book_id: PydanticObjectId) -> None: ...
-    async def change_member_role(
+    async def save_new_club_with_owner(
         self,
-        club_id: PydanticObjectId,
-        member_id: PydanticObjectId,
-        new_role: MemberRole,
-    ) -> bool: ...
+        club: ClubModel,
+        owner_id: PydanticObjectId,
+        joined_at: datetime,
+    ) -> ClubModel:
+        """Inserts the club document and its founding OWNER membership row in one transaction."""
+        ...
+
     async def update_settings(
         self,
         club_id: PydanticObjectId,
@@ -127,6 +109,54 @@ class ClubRepository(Protocol):
         join_policy: JoinPolicy | None = None,
         allow_suggestions: bool | None = None,
         preferred_languages: list[LanguageStr] | None = None,
+    ) -> bool: ...
+    async def save(self, club: ClubModel) -> ClubModel: ...
+    async def delete_with_memberships(self, club_id: PydanticObjectId) -> None:
+        """Deletes the club document and every membership row for it in one transaction."""
+        ...
+
+
+class ClubMembershipRepository(Protocol):
+    async def find_member_role_by_club_id_and_user_id(
+        self,
+        club_id: PydanticObjectId,
+        user_id: PydanticObjectId,
+    ) -> MemberRole | None: ...
+    async def exists_by_club_id_and_member_user_id(
+        self,
+        club_id: PydanticObjectId,
+        user_id: PydanticObjectId,
+    ) -> bool: ...
+    async def exists_by_club_id_and_pending_user_id(
+        self,
+        club_id: PydanticObjectId,
+        user_id: PydanticObjectId,
+    ) -> bool: ...
+    async def exists_by_club_id_and_banned_user_id(
+        self,
+        club_id: PydanticObjectId,
+        user_id: PydanticObjectId,
+    ) -> bool: ...
+    async def upsert_member(
+        self,
+        club_id: PydanticObjectId,
+        user_id: PydanticObjectId,
+        role: MemberRole,
+        joined_at: datetime,
+    ) -> None: ...
+    async def create_pending_request(
+        self,
+        club_id: PydanticObjectId,
+        user_id: PydanticObjectId,
+        requested_at: datetime,
+    ) -> None: ...
+    async def delete_membership(self, club_id: PydanticObjectId, user_id: PydanticObjectId) -> None: ...
+    async def ban_member(self, club_id: PydanticObjectId, user_id: PydanticObjectId) -> None: ...
+    async def change_member_role(
+        self,
+        club_id: PydanticObjectId,
+        member_id: PydanticObjectId,
+        new_role: MemberRole,
     ) -> bool: ...
     async def transfer_ownership(
         self,
@@ -141,8 +171,15 @@ class ClubRepository(Protocol):
         former_owner_id: PydanticObjectId,
         current_owner_id: PydanticObjectId,
     ) -> bool: ...
-    async def save(self, club: ClubModel) -> ClubModel: ...
-    async def delete(self, club_id: PydanticObjectId) -> None: ...
+    async def find_active_by_club_id(self, club_id: PydanticObjectId) -> list[ClubMembershipModel]: ...
+    async def find_active_membership_by_club_id_and_user_id(
+        self,
+        club_id: PydanticObjectId,
+        user_id: PydanticObjectId,
+    ) -> ClubMembershipModel | None: ...
+    async def find_pending_by_club_id(self, club_id: PydanticObjectId) -> list[ClubMembershipModel]: ...
+    async def find_active_member_ids_by_club_id(self, club_id: PydanticObjectId) -> list[PydanticObjectId]: ...
+    async def find_owner_id_by_club_id(self, club_id: PydanticObjectId) -> PydanticObjectId | None: ...
 
 
 class CacheRepository(Protocol):

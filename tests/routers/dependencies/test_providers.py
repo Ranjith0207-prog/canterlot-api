@@ -29,6 +29,7 @@ from canterlot.models.user import UserModel
 from canterlot.repositories import (
     BookRepository,
     CacheRepository,
+    ClubMembershipRepository,
     ClubRepository,
     DatabaseRepository,
     InviteRepository,
@@ -39,6 +40,7 @@ from canterlot.repositories import (
 )
 from canterlot.repositories.beanie import (
     BeanieBookRepository,
+    BeanieClubMembershipRepository,
     BeanieClubRepository,
     BeanieDatabaseRepository,
     BeanieInviteRepository,
@@ -65,6 +67,7 @@ from canterlot.routers.dependencies.providers import (
     get_change_password_use_case,
     get_club_from_slug,
     get_club_id_from_slug,
+    get_club_membership_repository,
     get_club_repository,
     get_club_service,
     get_confirm_email_verification_use_case,
@@ -351,6 +354,7 @@ def describe_service_factories():
     def it_builds_beanie_backed_repositories():
         assert isinstance(get_book_repository(), BeanieBookRepository)
         assert isinstance(get_club_repository(), BeanieClubRepository)
+        assert isinstance(get_club_membership_repository(), BeanieClubMembershipRepository)
         assert isinstance(get_user_repository(), BeanieUserRepository)
         assert isinstance(get_invite_repository(), BeanieInviteRepository)
         assert isinstance(get_verification_repository(), BeanieVerificationRepository)
@@ -470,6 +474,7 @@ def describe_service_factories_real():
         service = await get_catalog_service(
             book_repo=AsyncMock(spec=BookRepository),
             club_repo=AsyncMock(spec=ClubRepository),
+            club_membership_repo=AsyncMock(spec=ClubMembershipRepository),
             user_repo=AsyncMock(spec=UserRepository),
             link_providers=[AsyncMock(spec=LinkProvider)],
             round_repo=AsyncMock(spec=RoundRepository),
@@ -483,6 +488,7 @@ def describe_service_factories_real():
     async def it_builds_a_club_service():
         service = await get_club_service(
             club_repo=AsyncMock(spec=ClubRepository),
+            club_membership_repo=AsyncMock(spec=ClubMembershipRepository),
             user_repo=AsyncMock(spec=UserRepository),
             book_repo=AsyncMock(spec=BookRepository),
             read_book_repo=AsyncMock(spec=ReadBookRepository),
@@ -493,6 +499,7 @@ def describe_service_factories_real():
         service = await get_invite_service(
             invite_repo=AsyncMock(spec=InviteRepository),
             club_repo=AsyncMock(spec=ClubRepository),
+            club_membership_repo=AsyncMock(spec=ClubMembershipRepository),
             user_repo=AsyncMock(spec=UserRepository),
         )
         assert isinstance(service, InviteService)

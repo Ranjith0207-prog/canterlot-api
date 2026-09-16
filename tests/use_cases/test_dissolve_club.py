@@ -5,12 +5,10 @@ from beanie import PydanticObjectId
 
 from canterlot.emails.core.definitions import EmailTaskPayload
 from canterlot.emails.core.schemas import SpikeActionContext
-from canterlot.models.club import MemberSchema
 from canterlot.services.dispatch import BatchEmailDispatchItem
-from canterlot.types import MemberRole
+from canterlot.types import MembershipStatus
 from canterlot.use_cases.dissolve_club import DissolveClubUseCase
-from tools.factories import ClubFactory, UserFactory
-from tools.factories.base import MemberFactory
+from tools.factories import ClubFactory, ClubMembershipFactory, UserFactory
 
 SOME_USER_ID = PydanticObjectId("507f1f77bcf86cd799439011")
 SOME_CLUB_ID = PydanticObjectId("507f1f77bcf86cd799439012")
@@ -37,10 +35,10 @@ def describe_dissolve_club_use_case():
         email_dispatch_service: AsyncMock,
     ):
         owner = UserFactory.build(id=SOME_USER_ID)
-        club = ClubFactory.build(
-            id=SOME_CLUB_ID,
-            members=[MemberFactory.build(user_id=owner.id, role=MemberRole.OWNER)],
-        )
+        club = ClubFactory.build(id=SOME_CLUB_ID)
+        club_service.get_active_members.return_value = [
+            ClubMembershipFactory.build(club_id=SOME_CLUB_ID, user_id=owner.id, status=MembershipStatus.OWNER),
+        ]
 
         await use_case.execute(club, owner)
 
@@ -75,14 +73,12 @@ def describe_dissolve_club_use_case():
             email="rarity@canterlot.dev",
         )
 
-        club = ClubFactory.build(
-            id=SOME_CLUB_ID,
-            members=[
-                MemberSchema(user_id=uid),
-                MemberSchema(user_id=uid1),
-                MemberSchema(user_id=uid2),
-            ],
-        )
+        club = ClubFactory.build(id=SOME_CLUB_ID)
+        club_service.get_active_members.return_value = [
+            ClubMembershipFactory.build(club_id=SOME_CLUB_ID, user_id=uid, status=MembershipStatus.OWNER),
+            ClubMembershipFactory.build(club_id=SOME_CLUB_ID, user_id=uid1, status=MembershipStatus.MEMBER),
+            ClubMembershipFactory.build(club_id=SOME_CLUB_ID, user_id=uid2, status=MembershipStatus.MEMBER),
+        ]
 
         user_service.get_by_ids.return_value = [other_user_1, other_user_2]
 

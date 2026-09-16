@@ -113,9 +113,10 @@ async def update_club_settings(
     club_service: Annotated[ClubService, Depends(get_club_service)],
 ) -> ClubResponse:
     updated = await club_service.update_settings(club, current_user_id, payload)
-    member_usernames = await club_service.resolve_member_usernames(updated.members)
+    active_members = await club_service.get_active_members(PydanticObjectId(updated.id))
+    member_usernames = await club_service.resolve_member_usernames([member.user_id for member in active_members])
 
-    return ClubResponse.from_model(updated, user_usernames=member_usernames)
+    return ClubResponse.from_model(updated, active_members, user_usernames=member_usernames)
 
 
 @router.get(
@@ -131,15 +132,17 @@ async def get_club(
 ) -> ClubDetailResponse | ClubResponse:
     view = await club_service.get_club_view(club, current_user_id)
 
-    if view.pending_usernames is not None:
+    if view.pending is not None and view.pending_usernames is not None:
         return ClubDetailResponse.from_model_with_pending(
             view.club,
+            view.members,
             view.member_usernames,
+            view.pending,
             view.pending_usernames,
             current_user_id,
         )
 
-    return ClubResponse.from_model(view.club, view.member_usernames)
+    return ClubResponse.from_model(view.club, view.members, view.member_usernames)
 
 
 @router.delete(

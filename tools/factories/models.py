@@ -10,6 +10,7 @@ from canterlot.emails.core.enums import EmailCategory
 from canterlot.models import (
     BookModel,
     CatalogEntryModel,
+    ClubMembershipModel,
     ClubModel,
     InviteModel,
     ReadBookModel,
@@ -18,7 +19,6 @@ from canterlot.models import (
     UserModel,
 )
 from canterlot.models.book import LinkCandidate
-from canterlot.models.club import PendingApprovalSchema
 from canterlot.models.round import CandidatePoolEntry
 from canterlot.models.user import EmailPreferencesSchema, LinkedProviderSchema
 from canterlot.models.verification import VerificationCodeModel
@@ -28,13 +28,12 @@ from canterlot.types import (
     EarnedBadgeSchema,
     ExtensionType,
     InviteType,
-    MemberRole,
-    MemberSchema,
+    MembershipStatus,
     RoundSelectionMode,
     RoundStatus,
 )
 
-from .base import BaseDocumentFactory, BaseModelFactory, MemberFactory
+from .base import BaseDocumentFactory, BaseModelFactory
 
 
 class BaseLinkCadidateFactory[T: LinkCandidate](BaseModelFactory[T]):
@@ -99,27 +98,17 @@ class ClubFactory(BaseDocumentFactory[ClubModel]):
     slug = Use(lambda: ClubFactory.__faker__.slug())
     allow_suggestions = Use(lambda: ClubFactory.__faker__.boolean())
     preferred_languages = Use(lambda: [ClubFactory.__faker__.language_code() for _ in range(2)])
-    members = Use(lambda: ClubFactory._generate_members())
-    banned_users = Use(lambda: cast(list[PydanticObjectId], []))
-    pending_approvals = Use(lambda: cast(list[PendingApprovalSchema], []))
     catalog = Use(lambda: cast(list[CatalogEntryModel], []))
     ownership_transferred_at = None
     protected_former_owner_id = None
 
-    @classmethod
-    def _generate_members(cls) -> list[MemberSchema]:
-        faker = cls.__faker__
-        count = faker.random_int(min=1, max=5)
 
-        roles: list[MemberRole] = [MemberRole.OWNER]
-        non_owner_roles = [role for role in MemberRole if role != MemberRole.OWNER]
+class ClubMembershipFactory(BaseDocumentFactory[ClubMembershipModel]):
+    __model__ = ClubMembershipModel
 
-        for _ in range(count - 1):
-            roles.append(faker.random_element(non_owner_roles))
-
-        faker.random.shuffle(roles)
-
-        return [MemberFactory.build(role=role) for role in roles]
+    status = Use(lambda: ClubMembershipFactory.__faker__.random_element(list(MembershipStatus)))
+    joined_at = None
+    requested_at = None
 
 
 class InviteFactory(BaseDocumentFactory[InviteModel]):

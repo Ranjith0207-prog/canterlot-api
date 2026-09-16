@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import Literal, cast
 
 from beanie import PydanticObjectId
 from pydantic import BaseModel, Field, model_validator
@@ -9,6 +9,7 @@ from canterlot.config import get_settings
 from canterlot.dto.book import RatedBookSummaryDTO
 from canterlot.dto.user import AvatarDTO, BadgeDTO
 from canterlot.models.club import ClubModel
+from canterlot.models.club_membership import ClubMembershipModel
 from canterlot.models.user import UserModel
 from canterlot.pagination import Page
 from canterlot.types import (
@@ -18,7 +19,6 @@ from canterlot.types import (
     JoinPolicy,
     LanguageStr,
     MemberRole,
-    MemberSchema,
     PersonNameStr,
     UsernameStr,
 )
@@ -74,12 +74,12 @@ class ClubMemberProfileResponse(BaseModel):
     badges: list[BadgeDTO] = Field(default_factory=list)
 
     @classmethod
-    def from_models(cls, user: UserModel, member: MemberSchema) -> "ClubMemberProfileResponse":
+    def from_models(cls, user: UserModel, member: ClubMembershipModel) -> "ClubMemberProfileResponse":
         return cls(
             username=user.username,
             name=user.name,
-            role=member.role,
-            joined_at=member.joined_at,
+            role=MemberRole(member.status.value),
+            joined_at=cast(datetime, member.joined_at),
             avatar=AvatarDTO.from_model(user.avatar) if user.avatar else None,
             generated_avatar_seed=user.generated_avatar_seed,
             badges=[BadgeDTO.from_model(badge) for badge in user.badges],
@@ -120,12 +120,13 @@ class ClubResponse(BaseModel):
     def from_model(
         cls,
         club: ClubModel,
+        members: list[ClubMembershipModel],
         user_usernames: dict[PydanticObjectId, UsernameStr],
     ) -> "ClubResponse":
         role_order = list(MemberRole)
         sorted_members = sorted(
-            club.members,
-            key=lambda member: (role_order.index(member.role), user_usernames[member.user_id]),
+            members,
+            key=lambda member: (role_order.index(MemberRole(member.status.value)), user_usernames[member.user_id]),
         )
 
         return cls(
@@ -136,7 +137,11 @@ class ClubResponse(BaseModel):
             allow_suggestions=club.allow_suggestions,
             preferred_languages=club.preferred_languages,
             members=[
-                ClubMemberDTO(username=user_usernames[member.user_id], role=member.role, joined_at=member.joined_at)
+                ClubMemberDTO(
+                    username=user_usernames[member.user_id],
+                    role=MemberRole(member.status.value),
+                    joined_at=cast(datetime, member.joined_at),
+                )
                 for member in sorted_members
             ],
             created_at=club.created_at,
@@ -154,12 +159,14 @@ class ClubDetailResponse(ClubResponse):
     def from_model_with_pending(
         cls,
         club: ClubModel,
+        members: list[ClubMembershipModel],
         user_usernames: dict[PydanticObjectId, UsernameStr],
+        pending: list[ClubMembershipModel],
         pending_usernames: dict[PydanticObjectId, UsernameStr],
         viewer_id: PydanticObjectId,
     ) -> "ClubDetailResponse":
-        base = ClubResponse.from_model(club, user_usernames)
-        sorted_pending = sorted(club.pending_approvals, key=lambda pending: pending.requested_at)
+        base = ClubResponse.from_model(club, members, user_usernames)
+        sorted_pending = sorted(pending, key=lambda p: cast(datetime, p.requested_at))
 
         now = datetime.now(UTC)
         protected_former_owner = None
@@ -178,10 +185,10 @@ class ClubDetailResponse(ClubResponse):
             **base.model_dump(),
             pending_approvals=[
                 PendingApprovalDTO(
-                    username=pending_usernames[pending.user_id],
-                    requested_at=pending.requested_at,
+                    username=pending_usernames[p.user_id],
+                    requested_at=cast(datetime, p.requested_at),
                 )
-                for pending in sorted_pending
+                for p in sorted_pending
             ],
             protected_former_owner=protected_former_owner,
             active_reclaim_deadline=active_reclaim_deadline,

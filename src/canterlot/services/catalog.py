@@ -22,7 +22,13 @@ from canterlot.models.book import SearchParams
 from canterlot.models.club import CatalogEntryModel
 from canterlot.models.round import RoundModel
 from canterlot.pagination import SortDirection
-from canterlot.repositories import BookRepository, ClubRepository, RoundRepository, UserRepository
+from canterlot.repositories import (
+    BookRepository,
+    ClubMembershipRepository,
+    ClubRepository,
+    RoundRepository,
+    UserRepository,
+)
 from canterlot.types import (
     AuthorList,
     ExtensionType,
@@ -58,12 +64,14 @@ class CatalogService:
         self,
         book_repo: BookRepository,
         club_repo: ClubRepository,
+        club_membership_repo: ClubMembershipRepository,
         user_repo: UserRepository,
         link_providers: list[LinkProvider],
         round_repo: RoundRepository,
     ):
         self.__book_repo = book_repo
         self.__club_repo = club_repo
+        self.__club_membership_repo = club_membership_repo
         self.__user_repo = user_repo
         self.__link_providers = link_providers
         self.__round_repo = round_repo
@@ -128,7 +136,7 @@ class CatalogService:
             log.warning("Removal rejected: book is not in this club's catalog")
             raise BookNotFoundError("This book is not in this club's catalog.")
 
-        role = await self.__club_repo.find_member_role_by_club_id_and_user_id(club_id, current_user_id)
+        role = await self.__club_membership_repo.find_member_role_by_club_id_and_user_id(club_id, current_user_id)
         is_privileged = role in (MemberRole.ADMIN, MemberRole.OWNER)
         is_original_suggester = entry.suggested_by == current_user_id
 
@@ -168,7 +176,7 @@ class CatalogService:
         log = logger.bind(club_id=str(club_id), current_user_id=str(current_user_id))
         log.info("Fetching club catalog page")
 
-        if not await self.__club_repo.exists_by_club_id_and_member_user_id(club_id, current_user_id):
+        if not await self.__club_membership_repo.exists_by_club_id_and_member_user_id(club_id, current_user_id):
             log.warning("Catalog page rejected: caller is not a club member")
             raise UnauthorizedClubMemberError("Only members of this club can view its catalog.")
 
@@ -200,7 +208,7 @@ class CatalogService:
         )
 
     async def __ensure_suggestion_allowed(self, club_id: PydanticObjectId, user_id: PydanticObjectId, log) -> None:
-        if not await self.__club_repo.exists_by_club_id_and_member_user_id(club_id, user_id):
+        if not await self.__club_membership_repo.exists_by_club_id_and_member_user_id(club_id, user_id):
             log.warning("Suggestion rejected: user is not a member of the club")
             raise UnauthorizedClubMemberError("Only members of this club can suggest books.")
 

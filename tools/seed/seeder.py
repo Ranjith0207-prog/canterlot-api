@@ -8,7 +8,7 @@ from canterlot.config import get_settings
 from canterlot.config.database import DatabaseManager
 from canterlot.emails import EmailCategory
 from canterlot.models import BEANIE_DOCUMENT_MODELS, BookModel, ClubModel, UserModel
-from canterlot.models.club import CatalogEntryModel, PendingApprovalSchema
+from canterlot.models.club import CatalogEntryModel
 from canterlot.models.round import CandidatePoolEntry
 from canterlot.models.user import EmailPreferencesSchema, LinkedProviderSchema
 from canterlot.types import (
@@ -16,15 +16,22 @@ from canterlot.types import (
     AvatarSchema,
     InviteType,
     JoinPolicy,
-    MemberRole,
-    MemberSchema,
+    MembershipStatus,
     RoundResolutionMethod,
     RoundSelectionMode,
     RoundStatus,
 )
 from canterlot.utils import get_logger, hash_password
 from canterlot.utils.slugs import make_slug
-from tools.factories import BookFactory, ClubFactory, InviteFactory, ReadBookFactory, RoundFactory, UserFactory
+from tools.factories import (
+    BookFactory,
+    ClubFactory,
+    ClubMembershipFactory,
+    InviteFactory,
+    ReadBookFactory,
+    RoundFactory,
+    UserFactory,
+)
 
 logger = get_logger(__name__)
 
@@ -178,8 +185,13 @@ async def _seed_clubs(users: dict[str, UserModel], batch_books: list[BookModel],
         slug=await make_slug("Public Hub", _slug_exists),
         join_policy=JoinPolicy.PUBLIC,
         allow_suggestions=True,
-        members=[MemberSchema(user_id=standard_id, role=MemberRole.OWNER)],
         catalog=public_catalog,
+    )
+    await ClubMembershipFactory.create_async(
+        club_id=_get_id(public_hub),
+        user_id=standard_id,
+        status=MembershipStatus.OWNER,
+        joined_at=now,
     )
 
     restricted_hierarchy_catalog = [
@@ -196,14 +208,37 @@ async def _seed_clubs(users: dict[str, UserModel], batch_books: list[BookModel],
         slug=await make_slug("Restricted Hierarchy", _slug_exists),
         join_policy=JoinPolicy.RESTRICTED,
         allow_suggestions=True,
-        members=[
-            MemberSchema(user_id=standard_id, role=MemberRole.OWNER),
-            MemberSchema(user_id=unverified_id, role=MemberRole.ADMIN),
-            MemberSchema(user_id=oauth_id, role=MemberRole.MEMBER),
-        ],
-        banned_users=[stale_id],
-        pending_approvals=[PendingApprovalSchema(user_id=hybrid_id)],
         catalog=restricted_hierarchy_catalog,
+    )
+    restricted_hierarchy_id = _get_id(restricted_hierarchy)
+    await ClubMembershipFactory.create_async(
+        club_id=restricted_hierarchy_id,
+        user_id=standard_id,
+        status=MembershipStatus.OWNER,
+        joined_at=now,
+    )
+    await ClubMembershipFactory.create_async(
+        club_id=restricted_hierarchy_id,
+        user_id=unverified_id,
+        status=MembershipStatus.ADMIN,
+        joined_at=now,
+    )
+    await ClubMembershipFactory.create_async(
+        club_id=restricted_hierarchy_id,
+        user_id=oauth_id,
+        status=MembershipStatus.MEMBER,
+        joined_at=now,
+    )
+    await ClubMembershipFactory.create_async(
+        club_id=restricted_hierarchy_id,
+        user_id=stale_id,
+        status=MembershipStatus.BANNED,
+    )
+    await ClubMembershipFactory.create_async(
+        club_id=restricted_hierarchy_id,
+        user_id=hybrid_id,
+        status=MembershipStatus.PENDING,
+        requested_at=now,
     )
 
     protected_transition_catalog = [
@@ -219,20 +254,34 @@ async def _seed_clubs(users: dict[str, UserModel], batch_books: list[BookModel],
         name="Protected Transition",
         slug=await make_slug("Protected Transition", _slug_exists),
         allow_suggestions=True,
-        members=[
-            MemberSchema(user_id=oauth_id, role=MemberRole.OWNER),
-            MemberSchema(user_id=standard_id, role=MemberRole.ADMIN),
-        ],
         ownership_transferred_at=now - timedelta(days=2),
         protected_former_owner_id=standard_id,
         catalog=protected_transition_catalog,
+    )
+    protected_transition_id = _get_id(protected_transition)
+    await ClubMembershipFactory.create_async(
+        club_id=protected_transition_id,
+        user_id=oauth_id,
+        status=MembershipStatus.OWNER,
+        joined_at=now,
+    )
+    await ClubMembershipFactory.create_async(
+        club_id=protected_transition_id,
+        user_id=standard_id,
+        status=MembershipStatus.ADMIN,
+        joined_at=now,
     )
 
     locked_queue = await ClubFactory.create_async(
         name="Locked Queue",
         slug=await make_slug("Locked Queue", _slug_exists),
         allow_suggestions=False,
-        members=[MemberSchema(user_id=standard_id, role=MemberRole.OWNER)],
+    )
+    await ClubMembershipFactory.create_async(
+        club_id=_get_id(locked_queue),
+        user_id=standard_id,
+        status=MembershipStatus.OWNER,
+        joined_at=now,
     )
 
     clubs = [public_hub, restricted_hierarchy, protected_transition, locked_queue]

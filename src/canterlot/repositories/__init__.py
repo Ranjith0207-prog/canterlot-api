@@ -1,6 +1,7 @@
 from .interfaces import (
     BookRepository,
     CacheRepository,
+    ClubMembershipRepository,
     ClubRepository,
     DatabaseRepository,
     InviteRepository,
@@ -15,6 +16,7 @@ from .interfaces import (
 __all__ = [
     "BookRepository",
     "CacheRepository",
+    "ClubMembershipRepository",
     "ClubRepository",
     "DatabaseRepository",
     "InviteRepository",

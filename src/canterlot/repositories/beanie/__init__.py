@@ -1,5 +1,6 @@
 from .book import BeanieBookRepository
 from .club import BeanieClubRepository
+from .club_membership import BeanieClubMembershipRepository
 from .database import BeanieDatabaseRepository
 from .invite import BeanieInviteRepository
 from .read_book import BeanieReadBookRepository
@@ -10,6 +11,7 @@ from .verification import BeanieVerificationRepository
 
 __all__ = [
     "BeanieBookRepository",
+    "BeanieClubMembershipRepository",
     "BeanieClubRepository",
     "BeanieDatabaseRepository",
     "BeanieInviteRepository",
