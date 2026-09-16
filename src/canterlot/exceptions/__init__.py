@@ -28,6 +28,7 @@ from .book import (
     BookSearchCriteriaMissingError,
 )
 from .club import (
+    BookLockedInActiveRoundError,
     CannotChangeOwnerRoleError,
     CannotTransferOwnershipToSelfError,
     ClubDomainError,
@@ -52,14 +53,23 @@ from .invite import (
     InviteLinkDeactivatedError,
 )
 from .rate_limit import RateLimitExceededError
+from .round import (
+    ActiveRoundAlreadyExistsError,
+    NoEligibleCatalogError,
+    RoundAlreadyFinalizedError,
+    RoundDomainError,
+    RoundNotFoundError,
+)
 from .user import StaleLegalVersionError, UserDomainError, UserNotFoundError
 
 __all__ = [
+    "ActiveRoundAlreadyExistsError",
     "AuthProviderAlreadyLinkedError",
     "AuthProviderNotLinkedError",
     "AuthenticationError",
     "BookDetailsNotFoundError",
     "BookDomainError",
+    "BookLockedInActiveRoundError",
     "BookNotFoundError",
     "BookProviderUnavailableError",
     "BookSearchCriteriaMissingError",
@@ -86,6 +96,7 @@ __all__ = [
     "LastAuthenticationMethodError",
     "MemberBannedError",
     "MemberRoleChangeConflictError",
+    "NoEligibleCatalogError",
     "OAuthAccountCreationConflictError",
     "OAuthLinkRequiredError",
     "OwnershipReclaimWindowExpiredError",
@@ -95,6 +106,9 @@ __all__ = [
     "PasswordNotSetError",
     "PendingRequestNotFoundError",
     "RateLimitExceededError",
+    "RoundAlreadyFinalizedError",
+    "RoundDomainError",
+    "RoundNotFoundError",
     "SamePasswordError",
     "StaleLegalVersionError",
     "TokenError",

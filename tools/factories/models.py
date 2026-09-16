@@ -7,9 +7,19 @@ from polyfactory import Use
 from pydantic import HttpUrl
 
 from canterlot.emails.core.enums import EmailCategory
-from canterlot.models import BookModel, CatalogEntryModel, ClubModel, InviteModel, ReadBookModel, UserModel
+from canterlot.models import (
+    BookModel,
+    CatalogEntryModel,
+    ClubModel,
+    InviteModel,
+    ReadBookModel,
+    RoundCompletionModel,
+    RoundModel,
+    UserModel,
+)
 from canterlot.models.book import LinkCandidate
 from canterlot.models.club import PendingApprovalSchema
+from canterlot.models.round import CandidatePoolEntry
 from canterlot.models.user import EmailPreferencesSchema, LinkedProviderSchema
 from canterlot.models.verification import VerificationCodeModel
 from canterlot.types import (
@@ -20,6 +30,8 @@ from canterlot.types import (
     InviteType,
     MemberRole,
     MemberSchema,
+    RoundSelectionMode,
+    RoundStatus,
 )
 
 from .base import BaseDocumentFactory, BaseModelFactory, MemberFactory
@@ -202,6 +214,23 @@ class ReadBookFactory(BaseDocumentFactory[ReadBookModel]):
     rating = Use(
         lambda: ReadBookFactory.__faker__.random_element([None, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 4.5, 5.0])
     )
+
+
+class RoundFactory(BaseDocumentFactory[RoundModel]):
+    __model__ = RoundModel
+
+    selection_mode = Use(lambda: RoundFactory.__faker__.random_element(list(RoundSelectionMode)))
+    status = Use(lambda: RoundFactory.__faker__.random_element(list(RoundStatus)))
+    resolution_method = None
+    candidate_pool = Use(lambda: cast(list[CandidatePoolEntry], []))
+    book_id = None
+    deadline_duration = None
+    deadline = None
+    decided_at = None
+
+
+class RoundCompletionFactory(BaseDocumentFactory[RoundCompletionModel]):
+    __model__ = RoundCompletionModel
 
 
 class VerificationCodeFactory(BaseDocumentFactory[VerificationCodeModel]):

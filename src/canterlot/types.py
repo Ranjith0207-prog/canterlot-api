@@ -107,6 +107,35 @@ class VerificationScope(StrEnum):
                 return settings.verification_email_ttl_minutes
 
 
+class RoundSelectionMode(StrEnum):
+    RANDOM = "RANDOM"
+    CURATED = "CURATED"
+
+
+class RoundStatus(StrEnum):
+    SETUP = "SETUP"
+    VOTING = "VOTING"
+    DECIDED = "DECIDED"
+    CONCLUDED = "CONCLUDED"
+    CANCELLED = "CANCELLED"
+
+
+class RoundResolutionMethod(StrEnum):
+    DRAW = "DRAW"
+    VOTE = "VOTE"
+
+
+class DeadlineUnit(StrEnum):
+    DAYS = "DAYS"
+    WEEKS = "WEEKS"
+    MONTHS = "MONTHS"
+
+
+class DeadlineType(StrEnum):
+    PRESET = "PRESET"
+    CUSTOM = "CUSTOM"
+
+
 # === 2. Base & Domain Types ===
 def _validate_secret_verification_code(v: object) -> SecretStr:
     raw_val = v.get_secret_value() if isinstance(v, SecretStr) else v
