@@ -51,6 +51,8 @@ from canterlot.routers.dependencies.providers import (
     get_resend_webhook_handler,
     get_reset_password_use_case,
     get_revoke_auth_provider_use_case,
+    get_round_repository,
+    get_round_service,
     get_transfer_club_ownership_use_case,
     get_user_id_from_valid_refresh_token,
     get_user_id_from_valid_reset_token,
@@ -269,6 +271,7 @@ def client(  # noqa: PLR0917
     email_dispatch_service: AsyncMock,
     verification_service: AsyncMock,
     health_service: AsyncMock,
+    round_service: AsyncMock,
     accept_invite_use_case: AsyncMock,
     approve_pending_member_use_case: AsyncMock,
     change_member_role_use_case: AsyncMock,
@@ -297,6 +300,7 @@ def client(  # noqa: PLR0917
     invite_repo: AsyncMock,
     cache_repo: AsyncMock,
     verification_repo: AsyncMock,
+    round_repo: AsyncMock,
     rate_limiter: AsyncMock,
     current_user: UserModel,
     redis_client: AsyncMock,
@@ -324,6 +328,7 @@ def client(  # noqa: PLR0917
     app.dependency_overrides[get_email_dispatch_service] = lambda: email_dispatch_service
     app.dependency_overrides[get_verification_service] = lambda: verification_service
     app.dependency_overrides[get_health_service] = lambda: health_service
+    app.dependency_overrides[get_round_service] = lambda: round_service
 
     # --- 2. Use Case Overrides ---
     app.dependency_overrides[get_accept_invite_use_case] = lambda: accept_invite_use_case
@@ -356,6 +361,7 @@ def client(  # noqa: PLR0917
     app.dependency_overrides[get_invite_repository] = lambda: invite_repo
     app.dependency_overrides[get_cache_repository] = lambda: cache_repo
     app.dependency_overrides[get_verification_repository] = lambda: verification_repo
+    app.dependency_overrides[get_round_repository] = lambda: round_repo
     app.dependency_overrides[get_rate_limiter] = lambda: rate_limiter
 
     # --- 4. Webhook & Gateway Overrides ---

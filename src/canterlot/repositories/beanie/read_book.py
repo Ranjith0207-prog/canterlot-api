@@ -1,5 +1,5 @@
 from beanie import PydanticObjectId
-from beanie.operators import Set
+from beanie.operators import In, Set
 
 from canterlot.models import RatingStats, ReadBookModel
 from canterlot.pagination import Page, SortDirection
@@ -44,6 +44,56 @@ class BeanieReadBookRepository(ReadBookRepository):
             return RatingStats(average_rating=None, rating_count=0)
 
         return RatingStats(average_rating=results[0]["average_rating"], rating_count=results[0]["rating_count"])
+
+    async def find_rating_stats_by_book_ids(
+        self,
+        book_ids: list[PydanticObjectId],
+    ) -> dict[PydanticObjectId, RatingStats]:
+        if not book_ids:
+            return {}
+
+        results = (
+            await ReadBookModel.find(
+                In(ReadBookModel.book_id, book_ids),
+                ReadBookModel.rating != None,  # noqa: E711
+            )
+            .aggregate(
+                [
+                    {
+                        "$group": {
+                            "_id": "$book_id",
+                            "average_rating": {"$avg": "$rating"},
+                            "rating_count": {"$sum": 1},
+                        }
+                    }
+                ]
+            )
+            .to_list()
+        )
+
+        return {
+            row["_id"]: RatingStats(average_rating=row["average_rating"], rating_count=row["rating_count"])
+            for row in results
+        }
+
+    async def count_readers_among_users(
+        self,
+        book_ids: list[PydanticObjectId],
+        user_ids: list[PydanticObjectId],
+    ) -> dict[PydanticObjectId, int]:
+        if not book_ids or not user_ids:
+            return {}
+
+        results = (
+            await ReadBookModel.find(
+                In(ReadBookModel.book_id, book_ids),
+                In(ReadBookModel.user_id, user_ids),
+            )
+            .aggregate([{"$group": {"_id": "$book_id", "count": {"$sum": 1}}}])
+            .to_list()
+        )
+
+        return {row["_id"]: row["count"] for row in results}
 
     async def find_page_by_user_id(
         self,

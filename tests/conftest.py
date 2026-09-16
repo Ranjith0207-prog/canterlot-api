@@ -24,6 +24,8 @@ from canterlot.repositories import (
     ClubRepository,
     InviteRepository,
     ReadBookRepository,
+    RoundCompletionRepository,
+    RoundRepository,
     UserRepository,
     VerificationRepository,
 )
@@ -35,6 +37,7 @@ from canterlot.services import (
     EmailDispatchService,
     HealthService,
     InviteService,
+    RoundService,
     UserService,
     VerificationService,
 )
@@ -160,6 +163,16 @@ def read_book_repo() -> AsyncMock:
     return AsyncMock(spec=ReadBookRepository)
 
 
+@pytest.fixture
+def round_repo() -> AsyncMock:
+    return AsyncMock(spec=RoundRepository)
+
+
+@pytest.fixture
+def round_completion_repo() -> AsyncMock:
+    return AsyncMock(spec=RoundCompletionRepository)
+
+
 # ========================================================
 # Shared Service Mocks
 # ========================================================
@@ -210,6 +223,11 @@ def verification_service() -> AsyncMock:
 @pytest.fixture
 def health_service() -> AsyncMock:
     return AsyncMock(spec=HealthService)
+
+
+@pytest.fixture
+def round_service() -> AsyncMock:
+    return AsyncMock(spec=RoundService)
 
 
 # ========================================================

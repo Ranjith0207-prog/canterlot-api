@@ -33,6 +33,7 @@ from canterlot.repositories import (
     DatabaseRepository,
     InviteRepository,
     ReadBookRepository,
+    RoundRepository,
     UserRepository,
     VerificationRepository,
 )
@@ -471,6 +472,7 @@ def describe_service_factories_real():
             club_repo=AsyncMock(spec=ClubRepository),
             user_repo=AsyncMock(spec=UserRepository),
             link_providers=[AsyncMock(spec=LinkProvider)],
+            round_repo=AsyncMock(spec=RoundRepository),
         )
         assert isinstance(service, CatalogService)
 

@@ -36,6 +36,8 @@ from canterlot.repositories import (
     InviteRepository,
     RateLimiter,
     ReadBookRepository,
+    RoundCompletionRepository,
+    RoundRepository,
     UserRepository,
     VerificationRepository,
 )
@@ -45,6 +47,8 @@ from canterlot.repositories.beanie import (
     BeanieDatabaseRepository,
     BeanieInviteRepository,
     BeanieReadBookRepository,
+    BeanieRoundCompletionRepository,
+    BeanieRoundRepository,
     BeanieUserRepository,
     BeanieVerificationRepository,
 )
@@ -58,6 +62,7 @@ from canterlot.services import (
     EmailDispatchService,
     HealthService,
     InviteService,
+    RoundService,
     UserService,
     VerificationService,
 )
@@ -140,6 +145,14 @@ def get_read_book_repository() -> ReadBookRepository:
     return BeanieReadBookRepository()
 
 
+def get_round_repository() -> RoundRepository:
+    return BeanieRoundRepository()
+
+
+def get_round_completion_repository() -> RoundCompletionRepository:
+    return BeanieRoundCompletionRepository()
+
+
 def get_database_repositories(
     redis_client: Annotated[aioredis.Redis, Depends(get_redis_client)],
 ) -> list[DatabaseRepository]:
@@ -168,8 +181,15 @@ async def get_catalog_service(
     club_repo: Annotated[ClubRepository, Depends(get_club_repository)],
     user_repo: Annotated[UserRepository, Depends(get_user_repository)],
     link_providers: Annotated[list[LinkProvider], Depends(get_link_providers)],
+    round_repo: Annotated[RoundRepository, Depends(get_round_repository)],
 ) -> CatalogService:
-    return CatalogService(book_repo=book_repo, club_repo=club_repo, user_repo=user_repo, link_providers=link_providers)
+    return CatalogService(
+        book_repo=book_repo,
+        club_repo=club_repo,
+        user_repo=user_repo,
+        link_providers=link_providers,
+        round_repo=round_repo,
+    )
 
 
 async def get_resend_webhook_handler(
@@ -220,6 +240,15 @@ async def get_club_service(
     read_book_repo: Annotated[ReadBookRepository, Depends(get_read_book_repository)],
 ):
     return ClubService(club_repo, user_repo, book_repo, read_book_repo)
+
+
+async def get_round_service(
+    round_repo: Annotated[RoundRepository, Depends(get_round_repository)],
+    book_repo: Annotated[BookRepository, Depends(get_book_repository)],
+    read_book_repo: Annotated[ReadBookRepository, Depends(get_read_book_repository)],
+    round_completion_repo: Annotated[RoundCompletionRepository, Depends(get_round_completion_repository)],
+) -> RoundService:
+    return RoundService(round_repo, book_repo, read_book_repo, round_completion_repo)
 
 
 async def get_invite_service(

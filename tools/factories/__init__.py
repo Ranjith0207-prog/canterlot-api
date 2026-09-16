@@ -31,6 +31,8 @@ from .models import (
     LinkCadidateFactory,
     LinkedProviderFactory,
     ReadBookFactory,
+    RoundCompletionFactory,
+    RoundFactory,
     UserFactory,
     VerificationCodeFactory,
 )
@@ -66,6 +68,8 @@ __all__ = [
     "MemberFactory",
     "ReadBookFactory",
     "RegisterResponseFactory",
+    "RoundCompletionFactory",
+    "RoundFactory",
     "SearchResultFactory",
     "TokenResponseFactory",
     "UpdateProfileRequestFactory",

@@ -4,9 +4,11 @@ from fastapi import status
 
 from canterlot.dto.auth import ResetSessionStatusResponse
 from canterlot.exceptions import (
+    ActiveRoundAlreadyExistsError,
     AuthProviderAlreadyLinkedError,
     AuthProviderNotLinkedError,
     BookDetailsNotFoundError,
+    BookLockedInActiveRoundError,
     BookNotFoundError,
     BookProviderUnavailableError,
     BookSearchCriteriaMissingError,
@@ -31,6 +33,7 @@ from canterlot.exceptions import (
     LastAuthenticationMethodError,
     MemberBannedError,
     MemberRoleChangeConflictError,
+    NoEligibleCatalogError,
     OAuthAccountCreationConflictError,
     OAuthLinkRequiredError,
     OwnershipReclaimWindowExpiredError,
@@ -40,6 +43,8 @@ from canterlot.exceptions import (
     PasswordNotSetError,
     PendingRequestNotFoundError,
     RateLimitExceededError,
+    RoundAlreadyFinalizedError,
+    RoundNotFoundError,
     SamePasswordError,
     StaleLegalVersionError,
     TokenExpiredError,
@@ -402,6 +407,11 @@ REMOVE_FROM_CLUB_RESPONSES: ResponseDict = {
         "description": "ClubNotFoundError or BookNotFoundError.",
         "content": error_example(ClubNotFoundError, BookNotFoundError),
     },
+    status.HTTP_409_CONFLICT: {
+        "model": ErrorResponseModel,
+        "description": "BookLockedInActiveRoundError: The book is locked in by the club's active reading round.",
+        "content": error_example(BookLockedInActiveRoundError),
+    },
     status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "Validation error on path parameter."},
     **RESP_500_INTERNAL,
 }
@@ -678,6 +688,64 @@ RECLAIM_CLUB_OWNERSHIP_RESPONSES: ResponseDict = {
     status.HTTP_429_TOO_MANY_REQUESTS: {
         "model": ErrorResponseModel,
         "description": "RateLimitExceededError: Too many ownership actions.",
+        "content": error_example(RateLimitExceededError),
+    },
+    **RESP_500_INTERNAL,
+}
+
+# ==============================================================================
+# --- READING ROUNDS ROUTER RESPONSES ---
+# ==============================================================================
+
+START_READING_ROUND_RESPONSES: ResponseDict = {
+    status.HTTP_201_CREATED: {"description": "Reading round started successfully."},
+    **RESP_401_AUTH,
+    status.HTTP_403_FORBIDDEN: {
+        "model": ErrorResponseModel,
+        "description": "UnauthorizedClubMemberError: Caller does not hold OWNER/ADMIN standing.",
+        "content": error_example(UnauthorizedClubMemberError),
+    },
+    status.HTTP_404_NOT_FOUND: {
+        "model": ErrorResponseModel,
+        "description": "ClubNotFoundError: No club exists with the given slug.",
+        "content": error_example(ClubNotFoundError),
+    },
+    status.HTTP_409_CONFLICT: {
+        "model": ErrorResponseModel,
+        "description": "ActiveRoundAlreadyExistsError or NoEligibleCatalogError.",
+        "content": error_example(ActiveRoundAlreadyExistsError, NoEligibleCatalogError),
+    },
+    status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "Validation error on request body fields."},
+    status.HTTP_429_TOO_MANY_REQUESTS: {
+        "model": ErrorResponseModel,
+        "description": "RateLimitExceededError: Too many club moderation actions.",
+        "content": error_example(RateLimitExceededError),
+    },
+    **RESP_500_INTERNAL,
+}
+
+FINALIZE_READING_ROUND_RESPONSES: ResponseDict = {
+    status.HTTP_200_OK: {"description": "Reading round finalized successfully."},
+    **RESP_401_AUTH,
+    status.HTTP_403_FORBIDDEN: {
+        "model": ErrorResponseModel,
+        "description": "UnauthorizedClubMemberError: Caller does not hold OWNER/ADMIN standing.",
+        "content": error_example(UnauthorizedClubMemberError),
+    },
+    status.HTTP_404_NOT_FOUND: {
+        "model": ErrorResponseModel,
+        "description": "ClubNotFoundError or RoundNotFoundError.",
+        "content": error_example(ClubNotFoundError, RoundNotFoundError),
+    },
+    status.HTTP_409_CONFLICT: {
+        "model": ErrorResponseModel,
+        "description": "RoundAlreadyFinalizedError: The round is not in its setup phase.",
+        "content": error_example(RoundAlreadyFinalizedError),
+    },
+    status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "Validation error on request body fields."},
+    status.HTTP_429_TOO_MANY_REQUESTS: {
+        "model": ErrorResponseModel,
+        "description": "RateLimitExceededError: Too many club moderation actions.",
         "content": error_example(RateLimitExceededError),
     },
     **RESP_500_INTERNAL,

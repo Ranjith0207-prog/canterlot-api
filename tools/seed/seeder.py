@@ -9,11 +9,22 @@ from canterlot.config.database import DatabaseManager
 from canterlot.emails import EmailCategory
 from canterlot.models import BEANIE_DOCUMENT_MODELS, BookModel, ClubModel, UserModel
 from canterlot.models.club import CatalogEntryModel, PendingApprovalSchema
+from canterlot.models.round import CandidatePoolEntry
 from canterlot.models.user import EmailPreferencesSchema, LinkedProviderSchema
-from canterlot.types import AuthProviderName, AvatarSchema, InviteType, JoinPolicy, MemberRole, MemberSchema
+from canterlot.types import (
+    AuthProviderName,
+    AvatarSchema,
+    InviteType,
+    JoinPolicy,
+    MemberRole,
+    MemberSchema,
+    RoundResolutionMethod,
+    RoundSelectionMode,
+    RoundStatus,
+)
 from canterlot.utils import get_logger, hash_password
 from canterlot.utils.slugs import make_slug
-from tools.factories import BookFactory, ClubFactory, InviteFactory, ReadBookFactory, UserFactory
+from tools.factories import BookFactory, ClubFactory, InviteFactory, ReadBookFactory, RoundFactory, UserFactory
 
 logger = get_logger(__name__)
 
@@ -171,6 +182,15 @@ async def _seed_clubs(users: dict[str, UserModel], batch_books: list[BookModel],
         catalog=public_catalog,
     )
 
+    restricted_hierarchy_catalog = [
+        CatalogEntryModel(
+            book_id=_get_id(book),
+            suggested_by=unverified_id if i % 2 == 0 else oauth_id,
+            suggested_at=now - timedelta(days=i * 3),
+        )
+        for i, book in enumerate(batch_books[10:14])
+    ]
+
     restricted_hierarchy = await ClubFactory.create_async(
         name="Restricted Hierarchy",
         slug=await make_slug("Restricted Hierarchy", _slug_exists),
@@ -183,7 +203,17 @@ async def _seed_clubs(users: dict[str, UserModel], batch_books: list[BookModel],
         ],
         banned_users=[stale_id],
         pending_approvals=[PendingApprovalSchema(user_id=hybrid_id)],
+        catalog=restricted_hierarchy_catalog,
     )
+
+    protected_transition_catalog = [
+        CatalogEntryModel(
+            book_id=_get_id(book),
+            suggested_by=oauth_id if i % 2 == 0 else standard_id,
+            suggested_at=now - timedelta(days=i * 2),
+        )
+        for i, book in enumerate(batch_books[14:18])
+    ]
 
     protected_transition = await ClubFactory.create_async(
         name="Protected Transition",
@@ -195,6 +225,7 @@ async def _seed_clubs(users: dict[str, UserModel], batch_books: list[BookModel],
         ],
         ownership_transferred_at=now - timedelta(days=2),
         protected_former_owner_id=standard_id,
+        catalog=protected_transition_catalog,
     )
 
     locked_queue = await ClubFactory.create_async(
@@ -229,6 +260,45 @@ async def _seed_read_books(
     await ReadBookFactory.create_async(user_id=standard_id, book_id=_get_id(batch_books[0]), rating=None)
 
     log.info("Read books seeded")
+
+
+async def _seed_rounds(clubs: list[ClubModel], users: dict[str, UserModel], now: datetime) -> None:
+    log = logger.bind(phase="rounds")
+    log.info("Seeding reading rounds")
+
+    public_hub, restricted_hierarchy, protected_transition, _locked_queue = clubs
+    standard_id = _get_id(users["standard"])
+
+    await RoundFactory.create_async(
+        club_id=_get_id(public_hub),
+        started_by=standard_id,
+        selection_mode=RoundSelectionMode.RANDOM,
+        status=RoundStatus.DECIDED,
+        book_id=public_hub.catalog[0].book_id,
+        candidate_pool=[],
+        decided_at=now - timedelta(days=1),
+    )
+
+    await RoundFactory.create_async(
+        club_id=_get_id(restricted_hierarchy),
+        started_by=_get_id(users["unverified"]),
+        selection_mode=RoundSelectionMode.CURATED,
+        status=RoundStatus.SETUP,
+        book_id=None,
+        candidate_pool=[CandidatePoolEntry(book_id=entry.book_id) for entry in restricted_hierarchy.catalog],
+    )
+
+    await RoundFactory.create_async(
+        club_id=_get_id(protected_transition),
+        started_by=_get_id(users["oauth"]),
+        selection_mode=RoundSelectionMode.CURATED,
+        status=RoundStatus.VOTING,
+        resolution_method=RoundResolutionMethod.VOTE,
+        book_id=None,
+        candidate_pool=[CandidatePoolEntry(book_id=entry.book_id) for entry in protected_transition.catalog],
+    )
+
+    log.info("Reading rounds seeded", count=3)
 
 
 async def _seed_invites(clubs: list[ClubModel], users: dict[str, UserModel], now: datetime) -> None:
@@ -267,6 +337,7 @@ async def run_seed() -> None:
         await hybrid.save()
 
         await _seed_read_books(flawless_book, sparse_book, batch_books, users)
+        await _seed_rounds(clubs, users, now)
         await _seed_invites(clubs, users, now)
 
     logger.info(

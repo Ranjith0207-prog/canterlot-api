@@ -19,6 +19,11 @@ class ClubSuggestionsClosedError(ClubDomainError):
     status_code = status.HTTP_403_FORBIDDEN
 
 
+class BookLockedInActiveRoundError(ClubDomainError):
+    error_code = ErrorCode.BOOK_LOCKED_IN_ACTIVE_ROUND
+    status_code = status.HTTP_409_CONFLICT
+
+
 class UnauthorizedClubMemberError(ClubDomainError):
     error_code = ErrorCode.UNAUTHORIZED_CLUB_MEMBER
     status_code = status.HTTP_403_FORBIDDEN
