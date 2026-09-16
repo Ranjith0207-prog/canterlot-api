@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from canterlot.emails import EmailTemplate
 from canterlot.emails.core.schemas import BaseEmailContext
-from canterlot.types import BookProviderIdentifier, BookProviderName, MemberSchema
+from canterlot.types import BookProviderIdentifier, BookProviderName
 
 
 def get_random_email_template(faker: Faker) -> EmailTemplate[Any]:
@@ -99,8 +99,3 @@ class BaseContextFactory[T: BaseEmailContext](BaseModelFactory[T]):
     def build_for_template(cls, template: EmailTemplate[Any] | str, **kwargs: Any) -> BaseModel:
         factory_cls = cls.get_for_template(template)
         return cast(BaseModel, factory_cls.build(**kwargs))
-
-
-class MemberFactory(BaseModelFactory[MemberSchema]):
-    __model__ = MemberSchema
-    __set_as_default_factory_for_type__ = True
