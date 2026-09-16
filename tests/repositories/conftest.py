@@ -51,9 +51,15 @@ async def _wait_for_connectable(client: AsyncMongoClient) -> None:
 
 
 async def _initiate_replica_set(url: str) -> None:
-    probe_client: AsyncMongoClient = AsyncMongoClient(url, directConnection=True)
+    probe_client: AsyncMongoClient = AsyncMongoClient(
+        url,
+        directConnection=True,
+        serverSelectionTimeoutMS=30_000,
+    )
+
     try:
         await _wait_for_connectable(probe_client)
+
         try:
             await probe_client.admin.command("replSetGetStatus")
             return
@@ -61,20 +67,39 @@ async def _initiate_replica_set(url: str) -> None:
             if e.code != _REPL_SET_NOT_YET_INITIALIZED:
                 raise
 
-        # Must be mongod's own internal listen address, not the Docker-mapped host port.
         await probe_client.admin.command(
             "replSetInitiate",
-            {"_id": "rs0", "members": [{"_id": 0, "host": "localhost:27017"}]},
+            {
+                "_id": "rs0",
+                "members": [
+                    {
+                        "_id": 0,
+                        "host": "localhost:27017",
+                    }
+                ],
+            },
         )
-        for _ in range(30):
-            status = await probe_client.admin.command("replSetGetStatus")
-            if status["members"][0]["stateStr"] == "PRIMARY":
-                return
+
+        # Give MongoDB time to transition from STARTUP to PRIMARY.
+        await asyncio.sleep(2)
+
+        for _ in range(60):
+            try:
+                status = await probe_client.admin.command("replSetGetStatus")
+
+                if status["myState"] == 1:
+                    return
+
+            except OperationFailure as e:
+                if e.code != _REPL_SET_NOT_YET_INITIALIZED:
+                    raise
+
             await asyncio.sleep(1)
+
         raise RuntimeError("mongod replica set never reached PRIMARY state")
+
     finally:
         await probe_client.close()
-
 
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def _beanie_client(mongodb_container: DockerContainer) -> AsyncIterator[AsyncMongoClient]:
