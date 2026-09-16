@@ -100,6 +100,53 @@ def describe_find_rating_stats_by_book_id():
         assert stats.rating_count == 1
 
 
+def describe_find_rating_stats_by_book_ids():
+    async def it_returns_empty_dict_for_an_empty_input():
+        stats = await repo.find_rating_stats_by_book_ids([])
+
+        assert stats == {}
+
+    async def it_returns_stats_per_book_only_for_rated_books():
+        rated_book = await BookFactory.create_async()
+        unrated_book = await BookFactory.create_async()
+        for rating in (5.0, 3.0):
+            await ReadBookFactory.create_async(user_id=PydanticObjectId(), book_id=_id(rated_book), rating=rating)
+        await ReadBookFactory.create_async(user_id=PydanticObjectId(), book_id=_id(unrated_book), rating=None)
+
+        stats = await repo.find_rating_stats_by_book_ids([_id(rated_book), _id(unrated_book)])
+
+        assert stats[_id(rated_book)].average_rating == 4.0
+        assert stats[_id(rated_book)].rating_count == 2
+        assert _id(unrated_book) not in stats
+
+
+def describe_count_readers_among_users():
+    async def it_returns_empty_dict_when_no_one_has_read_any_of_the_books():
+        book = await BookFactory.create_async()
+
+        counts = await repo.count_readers_among_users([_id(book)], [PydanticObjectId()])
+
+        assert counts == {}
+
+    async def it_counts_only_the_given_users_who_have_read_the_given_books():
+        book = await BookFactory.create_async()
+        other_book = await BookFactory.create_async()
+        member_a = await UserFactory.create_async()
+        member_b = await UserFactory.create_async()
+        outsider = await UserFactory.create_async()
+        await ReadBookFactory.create_async(user_id=_id(member_a), book_id=_id(book), rating=None)
+        await ReadBookFactory.create_async(user_id=_id(member_b), book_id=_id(book), rating=None)
+        await ReadBookFactory.create_async(user_id=_id(outsider), book_id=_id(book), rating=None)
+        await ReadBookFactory.create_async(user_id=_id(member_a), book_id=_id(other_book), rating=None)
+
+        counts = await repo.count_readers_among_users(
+            [_id(book)],
+            [_id(member_a), _id(member_b)],
+        )
+
+        assert counts == {_id(book): 2}
+
+
 def describe_find_page_by_user_id():
     async def it_returns_an_empty_page_when_the_user_has_read_nothing():
         user = await UserFactory.create_async()

@@ -12,6 +12,7 @@ from canterlot.models import (
     LinkedProviderSchema,
     RatingStats,
     ReadBookModel,
+    RoundModel,
     UserModel,
     VerificationCodeModel,
 )
@@ -308,6 +309,15 @@ class ReadBookRepository(Protocol):
         rating: float | None,
     ) -> None: ...
     async def find_rating_stats_by_book_id(self, book_id: PydanticObjectId) -> RatingStats: ...
+    async def find_rating_stats_by_book_ids(
+        self,
+        book_ids: list[PydanticObjectId],
+    ) -> dict[PydanticObjectId, RatingStats]: ...
+    async def count_readers_among_users(
+        self,
+        book_ids: list[PydanticObjectId],
+        user_ids: list[PydanticObjectId],
+    ) -> dict[PydanticObjectId, int]: ...
     async def find_page_by_user_id(
         self,
         user_id: PydanticObjectId,
@@ -315,3 +325,24 @@ class ReadBookRepository(Protocol):
         limit: int,
         sort_direction: SortDirection = SortDirection.DESC,
     ) -> Page[ReadBookModel]: ...
+
+
+class RoundCompletionRepository(Protocol):
+    async def find_majority_excluded_book_ids(
+        self,
+        club_id: PydanticObjectId,
+        current_member_ids: set[PydanticObjectId],
+    ) -> set[PydanticObjectId]: ...
+
+
+class RoundRepository(Protocol):
+    async def find_active_by_club_id(self, club_id: PydanticObjectId) -> RoundModel | None: ...
+    async def save(self, round_: RoundModel) -> RoundModel: ...
+    async def finalize_with_draw(
+        self,
+        round_id: PydanticObjectId,
+        book_id: PydanticObjectId,
+        decided_at: datetime,
+        deadline: datetime | None,
+    ) -> bool: ...
+    async def finalize_with_vote(self, round_id: PydanticObjectId) -> bool: ...

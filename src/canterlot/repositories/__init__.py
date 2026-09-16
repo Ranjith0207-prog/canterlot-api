@@ -6,6 +6,8 @@ from .interfaces import (
     InviteRepository,
     RateLimiter,
     ReadBookRepository,
+    RoundCompletionRepository,
+    RoundRepository,
     UserRepository,
     VerificationRepository,
 )
@@ -18,6 +20,8 @@ __all__ = [
     "InviteRepository",
     "RateLimiter",
     "ReadBookRepository",
+    "RoundCompletionRepository",
+    "RoundRepository",
     "UserRepository",
     "VerificationRepository",
 ]
