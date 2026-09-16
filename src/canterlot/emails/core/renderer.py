@@ -25,6 +25,7 @@ class RenderedEmailTemplate[TContext: schemas.BaseEmailContext]:
     sender: str
     reply_to: NormalizedEmailStr
     headers: dict[str, str] | None
+    debug_context: dict[str, Any]
 
     def to_message(self, to: list[NormalizedEmailStr] | NormalizedEmailStr) -> EmailMessage:
         from canterlot.emails.interfaces import EmailMessage
@@ -38,6 +39,7 @@ class RenderedEmailTemplate[TContext: schemas.BaseEmailContext]:
             html=self.html,
             reply_to=self.reply_to,
             headers=self.headers,
+            debug_context=self.debug_context,
         )
 
 
@@ -106,4 +108,5 @@ def render_email_template[TContext: schemas.BaseEmailContext](
         sender=template.brand.sender,
         reply_to=_REPLY_TO,
         headers=_build_headers(render_context),
+        debug_context=context_dict,
     )

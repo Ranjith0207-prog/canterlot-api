@@ -18,5 +18,6 @@ class DryRunEmailClient(EmailClient):
             subject=message.subject,
             has_reply_to=message.reply_to is not None,
             has_headers=message.headers is not None,
+            debug_context=message.debug_context,
         )
         return EmailSendResult(success=True, dry_run=True)

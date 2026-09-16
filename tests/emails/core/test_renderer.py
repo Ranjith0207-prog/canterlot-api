@@ -38,6 +38,7 @@ def describe_render_email_template():
             "List-Unsubscribe": "<mailto:sunset@canterlot.com.br?subject=unsubscribe>, <https://canterlot.com.br/unsubscribe>",
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
         }
+        assert result.debug_context == context.model_dump(mode="json")
 
         mock_env.get_template.assert_called_once_with(random_template.template_path)
 
@@ -121,6 +122,18 @@ def describe_rendered_email_template():
 
         msg_list = result.to_message(["twilight@canterlot.com.br", "spike@canterlot.com.br"])
         assert msg_list.to == ["twilight@canterlot.com.br", "spike@canterlot.com.br"]
+
+    def it_forwards_debug_context_onto_the_email_message(
+        mock_jinja_env,  # noqa: ARG001
+        random_template: EmailTemplate[Any],
+    ):
+        context = BaseContextFactory.build_for_template(random_template)
+
+        result = render_email_template(random_template, context)
+        message = result.to_message("twilight@canterlot.com.br")
+
+        assert message.debug_context == result.debug_context
+        assert message.debug_context == context.model_dump(mode="json")
 
     def it_omits_headers_if_unsubscribe_url_is_invalid(mock_jinja_env, random_template: EmailTemplate[Any]):  # noqa: ARG001
         context = BaseContextFactory.build_for_template(random_template, unsubscribe_url=None)
