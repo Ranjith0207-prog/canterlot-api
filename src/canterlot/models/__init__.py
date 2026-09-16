@@ -1,7 +1,8 @@
 from beanie import Document
 
 from .book import BookModel, LinkCandidate
-from .club import CatalogEntryModel, ClubModel, PendingApprovalSchema
+from .club import CatalogEntryModel, ClubModel
+from .club_membership import ClubMembershipModel
 from .error import ErrorCode, ErrorDetail, ErrorResponseModel
 from .invite import InviteModel
 from .read_book import RatingStats, ReadBookModel
@@ -12,6 +13,7 @@ from .verification import VerificationCodeModel
 
 BEANIE_DOCUMENT_MODELS: list[type[Document]] = [
     BookModel,
+    ClubMembershipModel,
     ClubModel,
     InviteModel,
     ReadBookModel,
@@ -26,6 +28,7 @@ __all__ = [
     "BookModel",
     "CandidatePoolEntry",
     "CatalogEntryModel",
+    "ClubMembershipModel",
     "ClubModel",
     "DeadlineDuration",
     "ErrorCode",
@@ -34,7 +37,6 @@ __all__ = [
     "InviteModel",
     "LinkCandidate",
     "LinkedProviderSchema",
-    "PendingApprovalSchema",
     "RatingStats",
     "ReadBookModel",
     "RoundCompletionModel",

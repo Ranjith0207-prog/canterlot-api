@@ -3,7 +3,6 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Annotated, Any
 
-from beanie import PydanticObjectId
 from pydantic import (
     AfterValidator,
     BeforeValidator,
@@ -54,6 +53,14 @@ class MemberRole(StrEnum):
     OWNER = "OWNER"
     ADMIN = "ADMIN"
     MEMBER = "MEMBER"
+
+
+class MembershipStatus(StrEnum):
+    OWNER = "OWNER"
+    ADMIN = "ADMIN"
+    MEMBER = "MEMBER"
+    PENDING = "PENDING"
+    BANNED = "BANNED"
 
 
 class ClubOnboardingStatus(StrEnum):
@@ -201,12 +208,6 @@ def _validate_published_year(v: int) -> int:
         )
 
     return v
-
-
-class MemberSchema(BaseModel):
-    user_id: PydanticObjectId
-    role: MemberRole = MemberRole.MEMBER
-    joined_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
 class BookProviderIdentifier:

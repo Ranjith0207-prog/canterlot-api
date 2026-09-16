@@ -1,13 +1,13 @@
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
 from beanie import PydanticObjectId
 
 from canterlot.dto.club import ClubResponse
-from canterlot.models.club import MemberSchema
-from canterlot.types import JoinPolicy, MemberRole
+from canterlot.types import JoinPolicy, MemberRole, MembershipStatus
 from canterlot.use_cases.create_club import CreateClubUseCase
-from tools.factories import ClubCreateRequestFactory, ClubFactory
+from tools.factories import ClubCreateRequestFactory, ClubFactory, ClubMembershipFactory
 
 CREATOR_ID = PydanticObjectId("507f1f77bcf86cd799439011")
 CLUB_ID = PydanticObjectId("507f1f77bcf86cd799439012")
@@ -36,13 +36,15 @@ def describe_create_club_use_case():
             join_policy=JoinPolicy.PUBLIC,
         )
 
-        club = ClubFactory.build(
-            id=CLUB_ID,
-            name="The Canterlot Archives",
-            slug="the-canterlot-archives",
-            members=[MemberSchema(user_id=CREATOR_ID, role=MemberRole.OWNER)],
+        club = ClubFactory.build(id=CLUB_ID, name="The Canterlot Archives", slug="the-canterlot-archives")
+        owner_membership = ClubMembershipFactory.build(
+            club_id=CLUB_ID,
+            user_id=CREATOR_ID,
+            status=MembershipStatus.OWNER,
+            joined_at=datetime.now(UTC),
         )
         club_service.create_new_club.return_value = club
+        club_service.get_active_members.return_value = [owner_membership]
         club_service.resolve_member_usernames.return_value = {CREATOR_ID: "celestia"}
         invite_service.rotate_public_link.return_value = "public-token-123"
 
@@ -63,4 +65,5 @@ def describe_create_club_use_case():
             club_id=CLUB_ID,
             user_id=CREATOR_ID,
         )
-        club_service.resolve_member_usernames.assert_awaited_once_with(club.members)
+        club_service.get_active_members.assert_awaited_once_with(CLUB_ID)
+        club_service.resolve_member_usernames.assert_awaited_once_with([CREATOR_ID])

@@ -30,8 +30,8 @@ class DissolveClubUseCase:
         # ---------------------------------------------------------
         # 1. Resolve All Other Club Members
         # ---------------------------------------------------------
-        other_members = [m for m in club.members if m.user_id != owner_id]
-        member_ids = [m.user_id for m in other_members]
+        active_members = await self.__club_service.get_active_members(PydanticObjectId(club.id))
+        member_ids = [m.user_id for m in active_members if m.user_id != owner_id]
         member_users = await self.__user_service.get_by_ids(member_ids) if member_ids else []
 
         # ---------------------------------------------------------

@@ -5,14 +5,16 @@ from typing import cast
 from beanie import PydanticObjectId
 from beanie.operators import Pull, Push
 from pydantic import BaseModel, ConfigDict, Field
+from pymongo.asynchronous.client_session import AsyncClientSession
 from pymongo.results import UpdateResult
 
 from canterlot.exceptions import ClubNotFoundError
-from canterlot.models import BookModel, ClubModel, PendingApprovalSchema
+from canterlot.models import BookModel, ClubMembershipModel, ClubModel
 from canterlot.models.club import CatalogEntryModel
 from canterlot.pagination import Page, SortDirection
 from canterlot.repositories import ClubRepository
-from canterlot.types import ClubNameStr, ClubSlugStr, JoinPolicy, LanguageStr, MemberRole, MemberSchema
+from canterlot.repositories.beanie.transactions import transactional
+from canterlot.types import ClubNameStr, ClubSlugStr, JoinPolicy, LanguageStr, MembershipStatus
 
 _CATALOG_SORT_FIELD_PATHS = {
     "suggested_at": "catalog.suggested_at",
@@ -21,10 +23,6 @@ _CATALOG_SORT_FIELD_PATHS = {
     "year": "book.year",
 }
 _BOOK_JOINED_SORT_FIELDS = {"title", "author", "year"}
-
-
-class MemberProjection(BaseModel):
-    members: list[MemberSchema]
 
 
 class AllowSuggestionProjection(BaseModel):
@@ -70,22 +68,6 @@ class BeanieClubRepository(ClubRepository):
 
         return projection.preferred_languages
 
-    async def find_member_role_by_club_id_and_user_id(
-        self,
-        club_id: PydanticObjectId,
-        user_id: PydanticObjectId,
-    ) -> MemberRole | None:
-        query = ClubModel.find_one(ClubModel.id == club_id, ClubModel.members.user_id == user_id)
-
-        projected = await query.project(MemberProjection)
-
-        if not projected or not projected.members:
-            return None
-
-        target = next((m for m in projected.members if m.user_id == user_id), None)
-
-        return target.role if target else None
-
     async def find_by_slug(self, slug: ClubSlugStr) -> ClubModel | None:
         return await ClubModel.find_one(ClubModel.slug == slug)
 
@@ -98,20 +80,6 @@ class BeanieClubRepository(ClubRepository):
 
     async def exists_by_club_slug(self, slug: ClubSlugStr) -> bool:
         return await ClubModel.find(ClubModel.slug == slug).exists()
-
-    async def exists_by_club_id_and_member_user_id(
-        self,
-        club_id: PydanticObjectId,
-        user_id: PydanticObjectId,
-    ) -> bool:
-        return await ClubModel.find(ClubModel.id == club_id, ClubModel.members.user_id == user_id).exists()
-
-    async def exists_by_club_id_and_pending_user_id(
-        self,
-        club_id: PydanticObjectId,
-        user_id: PydanticObjectId,
-    ) -> bool:
-        return await ClubModel.find(ClubModel.id == club_id, ClubModel.pending_approvals.user_id == user_id).exists()
 
     async def exists_by_club_id_and_catalog_book_id(
         self,
@@ -208,52 +176,29 @@ class BeanieClubRepository(ClubRepository):
 
         return projection.allow_suggestions if projection else False
 
-    async def add_member(self, club_id: PydanticObjectId, member: MemberSchema) -> None:
-        await ClubModel.find_one(ClubModel.id == club_id).update_one(Push({ClubModel.members: member}))
-
-    async def add_to_pending_approvals(self, club_id: PydanticObjectId, user_id: PydanticObjectId) -> None:
-        entry = PendingApprovalSchema(user_id=user_id)
-
-        await ClubModel.find_one(ClubModel.id == club_id).update_one(Push({ClubModel.pending_approvals: entry}))
-
     async def add_to_catalog(self, club_id: PydanticObjectId, entry: CatalogEntryModel) -> None:
         await ClubModel.find_one(ClubModel.id == club_id).update_one(Push({ClubModel.catalog: entry}))
-
-    async def remove_member(self, club_id: PydanticObjectId, member_id: PydanticObjectId) -> None:
-        await ClubModel.find_one(ClubModel.id == club_id).update_one(Pull({ClubModel.members: {"user_id": member_id}}))
-
-    async def remove_and_ban_member(self, club_id: PydanticObjectId, member_id: PydanticObjectId) -> None:
-        await ClubModel.find_one(ClubModel.id == club_id).update_one(
-            Pull({ClubModel.members: {"user_id": member_id}}),
-            Push({ClubModel.banned_users: member_id}),
-        )
-
-    async def remove_from_pending_approvals(self, club_id: PydanticObjectId, user_id: PydanticObjectId) -> None:
-        await ClubModel.find_one(ClubModel.id == club_id).update_one(
-            Pull({ClubModel.pending_approvals: {"user_id": user_id}})
-        )
-
-    async def remove_from_banned_users(self, club_id: PydanticObjectId, user_id: PydanticObjectId) -> None:
-        await ClubModel.find_one(ClubModel.id == club_id).update_one(Pull({ClubModel.banned_users: user_id}))
 
     async def remove_from_catalog(self, club_id: PydanticObjectId, book_id: PydanticObjectId) -> None:
         await ClubModel.find_one(ClubModel.id == club_id).update_one(Pull({ClubModel.catalog: {"book_id": book_id}}))
 
-    async def change_member_role(
+    @transactional(ClubModel)
+    async def save_new_club_with_owner(
         self,
-        club_id: PydanticObjectId,
-        member_id: PydanticObjectId,
-        new_role: MemberRole,
-    ) -> bool:
-        result = await ClubModel.find_one(
-            ClubModel.id == club_id,
-            {"members": {"$elemMatch": {"user_id": member_id, "role": {"$ne": MemberRole.OWNER}}}},
-        ).update_one(
-            {"$set": {"members.$[target].role": new_role}},
-            array_filters=[{"target.user_id": member_id}],
-        )
+        session: AsyncClientSession,
+        club: ClubModel,
+        owner_id: PydanticObjectId,
+        joined_at: datetime,
+    ) -> ClubModel:
+        await club.insert(session=session)
+        await ClubMembershipModel(
+            club_id=PydanticObjectId(club.id),
+            user_id=owner_id,
+            status=MembershipStatus.OWNER,
+            joined_at=joined_at,
+        ).insert(session=session)
 
-        return cast(UpdateResult, result).matched_count > 0
+        return club
 
     async def update_settings(
         self,
@@ -283,63 +228,13 @@ class BeanieClubRepository(ClubRepository):
 
         return cast(UpdateResult, result).matched_count > 0
 
-    async def transfer_ownership(
-        self,
-        club_id: PydanticObjectId,
-        current_owner_id: PydanticObjectId,
-        new_owner_id: PydanticObjectId,
-        transferred_at: datetime,
-    ) -> bool:
-        # current_owner_id's OWNER role is part of the top-level filter, not just the array
-        # filter, so a stale caller races to matched_count == 0 instead of silently no-opping.
-        result = await ClubModel.find_one(
-            ClubModel.id == club_id,
-            {"members": {"$elemMatch": {"user_id": current_owner_id, "role": MemberRole.OWNER}}},
-        ).update_one(
-            {
-                "$set": {
-                    "members.$[oldOwner].role": MemberRole.ADMIN,
-                    "members.$[newOwner].role": MemberRole.OWNER,
-                    "ownership_transferred_at": transferred_at,
-                    "protected_former_owner_id": current_owner_id,
-                }
-            },
-            array_filters=[
-                {"oldOwner.user_id": current_owner_id},
-                {"newOwner.user_id": new_owner_id},
-            ],
-        )
-
-        return cast(UpdateResult, result).matched_count > 0
-
-    async def reclaim_ownership(
-        self,
-        club_id: PydanticObjectId,
-        former_owner_id: PydanticObjectId,
-        current_owner_id: PydanticObjectId,
-    ) -> bool:
-        result = await ClubModel.find_one(
-            ClubModel.id == club_id,
-            ClubModel.protected_former_owner_id == former_owner_id,
-        ).update_one(
-            {
-                "$set": {
-                    "members.$[formerOwner].role": MemberRole.OWNER,
-                    "members.$[currentOwner].role": MemberRole.ADMIN,
-                    "ownership_transferred_at": None,
-                    "protected_former_owner_id": None,
-                }
-            },
-            array_filters=[
-                {"formerOwner.user_id": former_owner_id},
-                {"currentOwner.user_id": current_owner_id},
-            ],
-        )
-
-        return cast(UpdateResult, result).matched_count > 0
-
     async def save(self, club: ClubModel) -> ClubModel:
         return await club.save()
 
-    async def delete(self, club_id: PydanticObjectId) -> None:
-        await ClubModel.find_one(ClubModel.id == club_id).delete()
+    @transactional(ClubModel)
+    async def delete_with_memberships(self, session: AsyncClientSession, club_id: PydanticObjectId) -> None:
+        await ClubModel.find_one(ClubModel.id == club_id, session=session).delete(session=session)
+        await ClubMembershipModel.find(
+            ClubMembershipModel.club_id == club_id,
+            session=session,
+        ).delete(session=session)

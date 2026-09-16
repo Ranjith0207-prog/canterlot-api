@@ -21,9 +21,15 @@ from canterlot.exceptions import (
     UnauthorizedClubMemberError,
 )
 from canterlot.exceptions.user import UserNotFoundError
-from canterlot.models import ClubModel
+from canterlot.models import ClubMembershipModel, ClubModel
 from canterlot.pagination import Page
-from canterlot.repositories import BookRepository, ClubRepository, ReadBookRepository, UserRepository
+from canterlot.repositories import (
+    BookRepository,
+    ClubMembershipRepository,
+    ClubRepository,
+    ReadBookRepository,
+    UserRepository,
+)
 from canterlot.services.rated_books import resolve_rated_books_page
 from canterlot.types import (
     ClubOnboardingStatus,
@@ -31,20 +37,11 @@ from canterlot.types import (
     JoinPolicy,
     LanguageStr,
     MemberRole,
-    MemberSchema,
     UsernameStr,
 )
 from canterlot.utils import get_logger, make_slug
 
 logger = get_logger(__name__)
-
-
-def _find_member(members: list[MemberSchema], user_id: PydanticObjectId) -> MemberSchema | None:
-    return next((m for m in members if m.user_id == user_id), None)
-
-
-def _find_owner(members: list[MemberSchema]) -> MemberSchema | None:
-    return next((m for m in members if m.role == MemberRole.OWNER), None)
 
 
 _ROLE_RANK = list(MemberRole)
@@ -57,9 +54,10 @@ def _outranks(actor: MemberRole, target: MemberRole) -> bool:
 @dataclass
 class ClubView:
     club: ClubModel
+    members: list[ClubMembershipModel]
     member_usernames: dict[PydanticObjectId, UsernameStr]
     viewer_role: MemberRole
-    # None unless the viewer is an OWNER/ADMIN — pending approvals are never resolved for anyone else.
+    pending: list[ClubMembershipModel] | None
     pending_usernames: dict[PydanticObjectId, UsernameStr] | None
 
 
@@ -67,6 +65,7 @@ class ClubService:
     def __init__(
         self,
         club_repo: ClubRepository,
+        club_membership_repo: ClubMembershipRepository,
         user_repo: UserRepository,
         book_repo: BookRepository,
         read_book_repo: ReadBookRepository,
@@ -74,6 +73,7 @@ class ClubService:
         settings = get_settings().ratelimit
 
         self.__club_repo = club_repo
+        self.__club_membership_repo = club_membership_repo
         self.__user_repo = user_repo
         self.__book_repo = book_repo
         self.__read_book_repo = read_book_repo
@@ -84,7 +84,6 @@ class ClubService:
         log = logger.bind(creator_id=str(creator_id), club_name=data.name, join_policy=str(data.join_policy))
         log.info("Initiating new book club workspace creation")
 
-        owner = MemberSchema(user_id=creator_id, role=MemberRole.OWNER)
         slug = await make_slug(data.name, self.__club_repo.exists_by_club_slug)
 
         club = ClubModel(
@@ -93,13 +92,16 @@ class ClubService:
             description=data.description,
             join_policy=data.join_policy,
             preferred_languages=data.preferred_languages,
-            members=[owner],
         )
 
-        saved_club = await self.__club_repo.save(club)
+        now = datetime.now(UTC)
+        saved_club = await self.__club_repo.save_new_club_with_owner(club, creator_id, now)
 
         log.info("Book club workspace successfully created and persisted", club_id=str(saved_club.id))
         return saved_club
+
+    async def get_active_members(self, club_id: PydanticObjectId) -> list[ClubMembershipModel]:
+        return await self.__club_membership_repo.find_active_by_club_id(club_id)
 
     async def admit_user(
         self,
@@ -116,37 +118,35 @@ class ClubService:
             raise ClubNotFoundError("This club no longer exists.")
 
         log = log.bind(club_name=club.name, club_join_policy=str(club.join_policy))
+        now = datetime.now(UTC)
         status = None
 
-        if _find_member(club.members, user_id) is not None:
+        if await self.__club_membership_repo.exists_by_club_id_and_member_user_id(club_id, user_id):
             log.info(
                 "Admission short-circuited: user already holds a seat in this roster",
                 status=ClubOnboardingStatus.ALREADY_MEMBER,
             )
             status = ClubOnboardingStatus.ALREADY_MEMBER
         elif is_direct:
-            if user_id in club.banned_users:
-                await self.__club_repo.remove_from_banned_users(club_id, user_id)
-                log.info("Direct invite cleared an existing ban for this user")
             status = ClubOnboardingStatus.JOINED
-            await self.__club_repo.add_member(club_id, MemberSchema(user_id=user_id, role=MemberRole.MEMBER))
+            await self.__club_membership_repo.upsert_member(club_id, user_id, MemberRole.MEMBER, now)
             log.info("User successfully admitted into the club roster", status=status)
-        elif user_id in club.banned_users:
+        elif await self.__club_membership_repo.exists_by_club_id_and_banned_user_id(club_id, user_id):
             status = ClubOnboardingStatus.BANNED
             log.warning("Admission rejected: user is banned from this club", status=status)
         elif club.join_policy == JoinPolicy.PUBLIC:
             status = ClubOnboardingStatus.JOINED
-            await self.__club_repo.add_member(club_id, MemberSchema(user_id=user_id, role=MemberRole.MEMBER))
+            await self.__club_membership_repo.upsert_member(club_id, user_id, MemberRole.MEMBER, now)
             log.info("User successfully admitted into the club roster", status=status)
         else:
             status = ClubOnboardingStatus.PENDING_APPROVAL
-            await self.__club_repo.add_to_pending_approvals(club_id, user_id)
+            await self.__club_membership_repo.create_pending_request(club_id, user_id, now)
             log.info("User profile successfully pushed into the club pending approval queue", status=status)
 
         return ClubOnboarding(club_name=club.name, status=status)
 
     async def get_preferred_languages(self, club_id: PydanticObjectId, user_id: PydanticObjectId) -> list[LanguageStr]:
-        if not await self.__club_repo.exists_by_club_id_and_member_user_id(club_id, user_id):
+        if not await self.__club_membership_repo.exists_by_club_id_and_member_user_id(club_id, user_id):
             logger.bind(club_id=str(club_id), user_id=str(user_id)).warning(
                 "Preferred languages lookup rejected: caller is not a club member"
             )
@@ -155,10 +155,13 @@ class ClubService:
         return await self.__club_repo.get_preferred_languages_by_id(club_id)
 
     async def get_member_role(self, club_id: PydanticObjectId, user_id: PydanticObjectId) -> MemberRole | None:
-        return await self.__club_repo.find_member_role_by_club_id_and_user_id(club_id, user_id)
+        return await self.__club_membership_repo.find_member_role_by_club_id_and_user_id(club_id, user_id)
 
-    async def resolve_member_usernames(self, members: list[MemberSchema]) -> dict[PydanticObjectId, UsernameStr]:
-        return await self.__user_repo.get_usernames_by_ids([member.user_id for member in members])
+    async def resolve_member_usernames(
+        self,
+        user_ids: list[PydanticObjectId],
+    ) -> dict[PydanticObjectId, UsernameStr]:
+        return await self.__user_repo.get_usernames_by_ids(user_ids)
 
     async def get_club_view(self, club: ClubModel, viewer_id: PydanticObjectId) -> ClubView:
         club_id = PydanticObjectId(club.id)
@@ -170,18 +173,21 @@ class ClubService:
             )
             raise UnauthorizedClubMemberError("Only members of this club can view it.")
 
-        member_usernames = await self.resolve_member_usernames(club.members)
+        members = await self.__club_membership_repo.find_active_by_club_id(club_id)
+        member_usernames = await self.resolve_member_usernames([member.user_id for member in members])
 
+        pending = None
         pending_usernames = None
         if viewer_role in (MemberRole.OWNER, MemberRole.ADMIN):
-            pending_usernames = await self.__user_repo.get_usernames_by_ids(
-                [pending.user_id for pending in club.pending_approvals]
-            )
+            pending = await self.__club_membership_repo.find_pending_by_club_id(club_id)
+            pending_usernames = await self.__user_repo.get_usernames_by_ids([p.user_id for p in pending])
 
         return ClubView(
             club=club,
+            members=members,
             member_usernames=member_usernames,
             viewer_role=viewer_role,
+            pending=pending,
             pending_usernames=pending_usernames,
         )
 
@@ -205,28 +211,37 @@ class ClubService:
             log.warning("Review rejected: caller lacks OWNER/ADMIN privileges")
             raise UnauthorizedClubMemberError("Only an OWNER or ADMIN can review pending join requests.")
 
-        if not await self.__club_repo.exists_by_club_id_and_pending_user_id(club_id, target_user_id):
+        if not await self.__club_membership_repo.exists_by_club_id_and_pending_user_id(club_id, target_user_id):
             log.warning("Review rejected: target user has no pending request in this club")
             raise PendingRequestNotFoundError("This user has no pending join request for this club.")
 
         if approve:
-            await self.__club_repo.add_member(club_id, MemberSchema(user_id=target_user_id, role=MemberRole.MEMBER))
+            await self.__club_membership_repo.upsert_member(
+                club_id,
+                target_user_id,
+                MemberRole.MEMBER,
+                datetime.now(UTC),
+            )
+        else:
+            await self.__club_membership_repo.delete_membership(club_id, target_user_id)
 
-        await self.__club_repo.remove_from_pending_approvals(club_id, target_user_id)
         log.info("Pending join request reviewed successfully", outcome="approved" if approve else "rejected")
 
-    def __ensure_viewer_can_view_member(
+    async def __ensure_viewer_can_view_member(
         self,
-        club: ClubModel,
+        club_id: PydanticObjectId,
         viewer_id: PydanticObjectId,
         target_user_id: PydanticObjectId,
         log,
-    ) -> MemberSchema:
-        if _find_member(club.members, viewer_id) is None:
+    ) -> ClubMembershipModel:
+        if not await self.__club_membership_repo.exists_by_club_id_and_member_user_id(club_id, viewer_id):
             log.warning("Member lookup rejected: caller is not a member of this club")
             raise UnauthorizedClubMemberError("Only members of this club can view another member's profile.")
 
-        target = _find_member(club.members, target_user_id)
+        target = await self.__club_membership_repo.find_active_membership_by_club_id_and_user_id(
+            club_id,
+            target_user_id,
+        )
         if target is None:
             log.warning("Member lookup rejected: target user is not a member of this club")
             raise ClubMemberNotFoundError("This user is not a member of this club.")
@@ -238,11 +253,11 @@ class ClubService:
         club: ClubModel,
         viewer_id: PydanticObjectId,
         target_user_id: PydanticObjectId,
-    ) -> MemberSchema:
+    ) -> ClubMembershipModel:
         log = logger.bind(club_id=str(club.id), viewer_id=str(viewer_id), target_user_id=str(target_user_id))
         log.info("Fetching club member profile")
 
-        target = self.__ensure_viewer_can_view_member(club, viewer_id, target_user_id, log)
+        target = await self.__ensure_viewer_can_view_member(PydanticObjectId(club.id), viewer_id, target_user_id, log)
 
         log.info("Club member profile resolved successfully")
         return target
@@ -258,7 +273,7 @@ class ClubService:
         log = logger.bind(club_id=str(club.id), viewer_id=str(viewer_id), target_user_id=str(target_user_id))
         log.info("Fetching club member's rated books page")
 
-        self.__ensure_viewer_can_view_member(club, viewer_id, target_user_id, log)
+        await self.__ensure_viewer_can_view_member(PydanticObjectId(club.id), viewer_id, target_user_id, log)
 
         rated_books_page = await resolve_rated_books_page(
             self.__book_repo,
@@ -284,32 +299,24 @@ class ClubService:
         )
         log.info("Initiating club member removal")
 
-        remover = _find_member(club.members, remover_id)
-        if remover is None or remover.role not in (MemberRole.OWNER, MemberRole.ADMIN):
+        club_id = PydanticObjectId(club.id)
+        remover_role = await self.get_member_role(club_id, remover_id)
+        if remover_role is None or remover_role not in (MemberRole.OWNER, MemberRole.ADMIN):
             log.warning("Removal rejected: caller lacks OWNER/ADMIN privileges")
             raise UnauthorizedClubMemberError("Only an OWNER or ADMIN can remove a member.")
 
-        target = _find_member(club.members, target_user_id)
-        if target is None:
+        target_role = await self.get_member_role(club_id, target_user_id)
+        if target_role is None:
             log.warning("Removal rejected: target user is not a member of this club")
             raise ClubMemberNotFoundError("This user is not a member of this club.")
 
-        if not _outranks(remover.role, target.role):
-            log.warning("Removal rejected: caller does not outrank the target", target_role=str(target.role))
+        if not _outranks(remover_role, target_role):
+            log.warning("Removal rejected: caller does not outrank the target", target_role=str(target_role))
             raise UnauthorizedClubMemberError("You do not have sufficient rank to remove this member.")
 
-        now = datetime.now(UTC)
-        if (
-            target_user_id == club.protected_former_owner_id
-            and club.ownership_transferred_at is not None
-            and now - club.ownership_transferred_at < self.__transfer_cooldown
-        ):
-            log.warning("Removal rejected: target is a protected former owner")
-            raise FormerOwnerProtectedError(
-                "This user transferred ownership away within the last 30 days and cannot be removed yet."
-            )
+        self.__ensure_target_not_protected_former_owner(club, target_user_id, log, action="removed")
 
-        await self.__club_repo.remove_and_ban_member(PydanticObjectId(club.id), target_user_id)
+        await self.__club_membership_repo.ban_member(club_id, target_user_id)
         log.info("Member removed and banned successfully")
 
     async def update_settings(
@@ -321,8 +328,8 @@ class ClubService:
         log = logger.bind(club_id=str(club.id), caller_id=str(caller_id))
         log.info("Initiating club settings update")
 
-        caller = _find_member(club.members, caller_id)
-        if caller is None or caller.role not in (MemberRole.OWNER, MemberRole.ADMIN):
+        caller_role = await self.get_member_role(PydanticObjectId(club.id), caller_id)
+        if caller_role is None or caller_role not in (MemberRole.OWNER, MemberRole.ADMIN):
             log.warning("Settings update rejected: caller lacks OWNER/ADMIN privileges")
             raise UnauthorizedClubMemberError("Only an OWNER or ADMIN can update club settings.")
 
@@ -377,78 +384,88 @@ class ClubService:
         )
         log.info("Initiating club member role change")
 
-        target = self.__ensure_role_change_is_allowed(club, caller_id, target_user_id, new_role, log)
-        if target is None:
+        club_id = PydanticObjectId(club.id)
+        target_role = await self.__ensure_role_change_is_allowed(
+            club,
+            club_id,
+            caller_id,
+            target_user_id,
+            new_role,
+            log,
+        )
+        if target_role is None:
             log.info("Role change short-circuited: target user already holds this role")
             return None
 
-        changed = await self.__club_repo.change_member_role(PydanticObjectId(club.id), target_user_id, new_role)
+        changed = await self.__club_membership_repo.change_member_role(club_id, target_user_id, new_role)
         if not changed:
             log.warning("Role change rejected: club membership changed before the update could complete")
             raise MemberRoleChangeConflictError(
                 "This club's membership changed before the role update could complete; please retry."
             )
 
-        is_promotion = _outranks(new_role, target.role)
+        is_promotion = _outranks(new_role, target_role)
 
         log.info("Member role changed successfully", is_promotion=is_promotion)
         return is_promotion
 
-    def __ensure_role_change_is_allowed(
+    async def __ensure_role_change_is_allowed(
         self,
         club: ClubModel,
+        club_id: PydanticObjectId,
         caller_id: PydanticObjectId,
         target_user_id: PydanticObjectId,
         new_role: MemberRole,
         log,
-    ) -> MemberSchema | None:
-        """Returns the target member, or None if the role change is a no-op. Raises on any other rejection."""
+    ) -> MemberRole | None:
+        """Returns the target's current role, or None if the role change is a no-op. Raises on any other rejection."""
 
         if new_role == MemberRole.OWNER:
             log.warning("Role change rejected: attempted to assign OWNER role")
             raise CannotChangeOwnerRoleError("Ownership can only be changed via the transfer-ownership action.")
 
-        caller = _find_member(club.members, caller_id)
-        if caller is None:
+        caller_role = await self.get_member_role(club_id, caller_id)
+        if caller_role is None:
             log.warning("Role change rejected: caller is not a member of this club")
             raise UnauthorizedClubMemberError("Only members with sufficient rank can change roles.")
 
-        target = _find_member(club.members, target_user_id)
-        if target is None:
+        target_role = await self.get_member_role(club_id, target_user_id)
+        if target_role is None:
             log.warning("Role change rejected: target user is not a member of this club")
             raise ClubMemberNotFoundError("This user is not a member of this club.")
 
-        if target.role == MemberRole.OWNER:
+        if target_role == MemberRole.OWNER:
             log.warning("Role change rejected: target is the club OWNER")
             raise CannotChangeOwnerRoleError("Ownership can only be changed via the transfer-ownership action.")
 
-        if target.role == new_role:
+        if target_role == new_role:
             return None
 
-        if not _outranks(caller.role, target.role):
+        if not _outranks(caller_role, target_role):
             log.warning(
                 "Role change rejected: caller does not outrank the target",
-                caller_role=str(caller.role),
-                target_role=str(target.role),
+                caller_role=str(caller_role),
+                target_role=str(target_role),
             )
             raise UnauthorizedClubMemberError("You do not have sufficient rank to change this member's role.")
 
-        if not _outranks(caller.role, new_role):
+        if not _outranks(caller_role, new_role):
             log.warning(
                 "Role change rejected: caller cannot assign a role equal to or higher than their own",
-                caller_role=str(caller.role),
+                caller_role=str(caller_role),
                 new_role=str(new_role),
             )
             raise UnauthorizedClubMemberError("You cannot assign a role equal to or higher than your own.")
 
-        self.__ensure_target_not_protected_former_owner(club, target_user_id, log)
-        return target
+        self.__ensure_target_not_protected_former_owner(club, target_user_id, log, action="demoted further")
+        return target_role
 
     def __ensure_target_not_protected_former_owner(
         self,
         club: ClubModel,
         target_user_id: PydanticObjectId,
         log,
+        action: str,
     ) -> None:
         now = datetime.now(UTC)
         if (
@@ -458,21 +475,22 @@ class ClubService:
         ):
             return
 
-        log.warning("Role change rejected: target is a protected former owner")
+        log.warning("Rejected: target is a protected former owner")
         raise FormerOwnerProtectedError(
-            "This user transferred ownership away within the last 30 days and cannot be demoted further yet."
+            f"This user transferred ownership away within the last 30 days and cannot be {action} yet."
         )
 
     async def leave_club(self, club: ClubModel, caller_id: PydanticObjectId) -> None:
         log = logger.bind(club_id=str(club.id), caller_id=str(caller_id))
         log.info("Initiating voluntary club departure")
 
-        caller = _find_member(club.members, caller_id)
-        if caller is None:
+        club_id = PydanticObjectId(club.id)
+        caller_role = await self.get_member_role(club_id, caller_id)
+        if caller_role is None:
             log.warning("Leave rejected: caller is not a member of this club")
             raise UnauthorizedClubMemberError("Only members of this club can leave it.")
 
-        if caller.role == MemberRole.OWNER:
+        if caller_role == MemberRole.OWNER:
             log.warning("Leave rejected: the OWNER can never leave directly")
             raise ClubOwnerCannotLeaveError(
                 "The OWNER cannot leave directly; transfer ownership or dissolve the club instead."
@@ -489,15 +507,16 @@ class ClubService:
                 "You transferred ownership away within the last 30 days and cannot leave yet."
             )
 
-        await self.__club_repo.remove_member(PydanticObjectId(club.id), caller_id)
+        await self.__club_membership_repo.delete_membership(club_id, caller_id)
         log.info("Member left the club successfully")
 
     async def dissolve_club(self, club: ClubModel, caller_id: PydanticObjectId) -> None:
         log = logger.bind(club_id=str(club.id), caller_id=str(caller_id))
         log.info("Initiating club dissolution")
 
-        caller = _find_member(club.members, caller_id)
-        if caller is None or caller.role != MemberRole.OWNER:
+        club_id = PydanticObjectId(club.id)
+        caller_role = await self.get_member_role(club_id, caller_id)
+        if caller_role is None or caller_role != MemberRole.OWNER:
             log.warning("Dissolution rejected: caller is not the club OWNER")
             raise UnauthorizedClubMemberError("Only the club OWNER can dissolve this club.")
 
@@ -512,7 +531,7 @@ class ClubService:
                 "This club cannot be dissolved while a former owner is still protected from removal."
             )
 
-        await self.__club_repo.delete(PydanticObjectId(club.id))
+        await self.__club_repo.delete_with_memberships(club_id)
         log.info("Club dissolved successfully")
 
     async def transfer_ownership(
@@ -535,11 +554,12 @@ class ClubService:
 
         log = log.bind(target_user_id=str(target_user_id))
 
+        club_id = PydanticObjectId(club.id)
         now = datetime.now(UTC)
-        self.__ensure_transfer_is_allowed(club, current_owner_id, target_user_id, now, log)
+        await self.__ensure_transfer_is_allowed(club, club_id, current_owner_id, target_user_id, now, log)
 
-        transferred = await self.__club_repo.transfer_ownership(
-            PydanticObjectId(club.id),
+        transferred = await self.__club_membership_repo.transfer_ownership(
+            club_id,
             current_owner_id,
             target_user_id,
             now,
@@ -553,9 +573,10 @@ class ClubService:
         log.info("Club ownership transferred successfully")
         return now + self.__reclaim_window
 
-    def __ensure_transfer_is_allowed(
+    async def __ensure_transfer_is_allowed(
         self,
         club: ClubModel,
+        club_id: PydanticObjectId,
         current_owner_id: PydanticObjectId,
         target_user_id: PydanticObjectId,
         now: datetime,
@@ -565,12 +586,12 @@ class ClubService:
             log.warning("Transfer rejected: cannot transfer ownership to yourself")
             raise CannotTransferOwnershipToSelfError("You cannot transfer ownership to yourself.")
 
-        caller = _find_member(club.members, current_owner_id)
-        if caller is None or caller.role != MemberRole.OWNER:
+        caller_role = await self.get_member_role(club_id, current_owner_id)
+        if caller_role is None or caller_role != MemberRole.OWNER:
             log.warning("Transfer rejected: caller is not the club OWNER")
             raise UnauthorizedClubMemberError("Only the club OWNER can transfer ownership.")
 
-        if _find_member(club.members, target_user_id) is None:
+        if await self.get_member_role(club_id, target_user_id) is None:
             log.warning("Transfer rejected: target user is not a member of this club")
             raise ClubMemberNotFoundError("This user is not a member of this club.")
 
@@ -585,7 +606,9 @@ class ClubService:
                 cooldown_expires_at=last_transfer + self.__transfer_cooldown,
             )
 
-    async def reclaim_ownership(self, club: ClubModel, caller_id: PydanticObjectId) -> None:
+    async def reclaim_ownership(self, club: ClubModel, caller_id: PydanticObjectId) -> PydanticObjectId:
+        """Returns the id of the user who was OWNER and just got demoted back to ADMIN."""
+
         log = logger.bind(club_id=str(club.id), caller_id=str(caller_id))
         log.info("Initiating ownership transfer reclaim")
 
@@ -593,9 +616,10 @@ class ClubService:
             log.warning("Reclaim rejected: caller is not the recorded former owner")
             raise UnauthorizedClubMemberError("You are not the recorded former owner of this club.")
 
+        club_id = PydanticObjectId(club.id)
         transferred_at = club.ownership_transferred_at
-        current_owner = _find_owner(club.members)
-        if transferred_at is None or current_owner is None:
+        current_owner_id = await self.__club_membership_repo.find_owner_id_by_club_id(club_id)
+        if transferred_at is None or current_owner_id is None:
             log.warning("Reclaim rejected: club ownership state is inconsistent")
             raise OwnershipTransferConflictError("This club's ownership state is inconsistent; please retry.")
 
@@ -607,11 +631,7 @@ class ClubService:
                 window_expired_at=transferred_at + self.__reclaim_window,
             )
 
-        reclaimed = await self.__club_repo.reclaim_ownership(
-            PydanticObjectId(club.id),
-            caller_id,
-            current_owner.user_id,
-        )
+        reclaimed = await self.__club_membership_repo.reclaim_ownership(club_id, caller_id, current_owner_id)
         if not reclaimed:
             log.warning("Reclaim rejected: club membership changed before the reclaim could complete")
             raise OwnershipTransferConflictError(
@@ -619,6 +639,7 @@ class ClubService:
             )
 
         log.info("Ownership transfer reclaimed successfully")
+        return current_owner_id
 
     async def get_club_id_by_slug(self, club_slug: ClubSlugStr) -> PydanticObjectId:
         club_id = await self.__club_repo.find_id_by_slug(club_slug)

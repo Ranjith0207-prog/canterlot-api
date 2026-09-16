@@ -13,7 +13,7 @@ from canterlot.exceptions import (
     UnauthorizedClubMemberError,
 )
 from canterlot.models.invite import InviteModel
-from canterlot.repositories import ClubRepository, InviteRepository, UserRepository
+from canterlot.repositories import ClubMembershipRepository, ClubRepository, InviteRepository, UserRepository
 from canterlot.types import ClubNameStr, InviteType, MemberRole, NormalizedEmailStr, UsernameStr
 from canterlot.utils import get_logger
 
@@ -33,10 +33,12 @@ class InviteService:
         self,
         invite_repo: InviteRepository,
         club_repo: ClubRepository,
+        club_membership_repo: ClubMembershipRepository,
         user_repo: UserRepository,
     ):
         self.__invite_repo = invite_repo
         self.__club_repo = club_repo
+        self.__club_membership_repo = club_membership_repo
         self.__user_repo = user_repo
 
     async def get_preview_metadata(
@@ -264,7 +266,7 @@ class InviteService:
             log.info("Generic token usage count metric incremented")
 
     async def __verify_privileged_role(self, club_id: PydanticObjectId, user_id: PydanticObjectId):
-        role = await self.__club_repo.find_member_role_by_club_id_and_user_id(club_id, user_id)
+        role = await self.__club_membership_repo.find_member_role_by_club_id_and_user_id(club_id, user_id)
 
         if not role or role not in [MemberRole.OWNER, MemberRole.ADMIN]:
             logger.warning(

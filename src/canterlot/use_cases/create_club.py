@@ -38,6 +38,9 @@ class CreateClubUseCase:
         # ---------------------------------------------------------
         # 3. Resolve Member Usernames & Return DTO
         # ---------------------------------------------------------
-        member_usernames = await self.__club_service.resolve_member_usernames(club.members)
+        active_members = await self.__club_service.get_active_members(PydanticObjectId(club.id))
+        member_usernames = await self.__club_service.resolve_member_usernames(
+            [member.user_id for member in active_members]
+        )
 
-        return ClubResponse.from_model(club, user_usernames=member_usernames)
+        return ClubResponse.from_model(club, active_members, user_usernames=member_usernames)
