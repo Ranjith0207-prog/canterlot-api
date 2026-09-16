@@ -6,16 +6,18 @@ from beanie import PydanticObjectId
 
 from canterlot.dto.catalog import BookSuggestionRequest, SuggestionStatus
 from canterlot.exceptions import (
+    BookLockedInActiveRoundError,
     BookNotFoundError,
     ClubSuggestionsClosedError,
     UnauthorizedClubMemberError,
 )
 from canterlot.models.book import LinkCandidate
 from canterlot.models.club import CatalogEntryModel
+from canterlot.models.round import CandidatePoolEntry
 from canterlot.pagination import Page, SortDirection
 from canterlot.services.catalog import CatalogService
 from canterlot.types import ExtensionType, MemberRole
-from tools.factories import BookFactory
+from tools.factories import BookFactory, RoundFactory
 
 SOME_CLUB_ID = PydanticObjectId("507f1f77bcf86cd799439011")
 SOME_USER_ID = PydanticObjectId("507f1f77bcf86cd799439012")
@@ -68,8 +70,12 @@ def _service(
     club_repo: AsyncMock,
     link_provider: AsyncMock,
     user_repo: AsyncMock | None = None,
+    round_repo: AsyncMock | None = None,
 ) -> CatalogService:
-    return CatalogService(book_repo, club_repo, user_repo or AsyncMock(), [link_provider])
+    if round_repo is None:
+        round_repo = AsyncMock()
+        round_repo.find_active_by_club_id.return_value = None
+    return CatalogService(book_repo, club_repo, user_repo or AsyncMock(), [link_provider], round_repo)
 
 
 def describe_membership_and_suggestion_gating():
@@ -324,6 +330,59 @@ def describe_removing_a_book_from_the_catalog():
 
         club_repo.find_member_role_by_club_id_and_user_id.assert_not_called()
         club_repo.remove_from_catalog.assert_not_called()
+
+    async def it_rejects_removal_when_the_book_is_the_active_rounds_decided_book(
+        book_repo: AsyncMock,
+        club_repo: AsyncMock,
+        link_provider: AsyncMock,
+        round_repo: AsyncMock,
+    ):
+        club_repo.find_catalog_entry_by_club_id_and_book_id.return_value = _entry()
+        club_repo.find_member_role_by_club_id_and_user_id.return_value = MemberRole.OWNER
+        round_repo.find_active_by_club_id.return_value = RoundFactory.build(book_id=SOME_BOOK_ID, candidate_pool=[])
+        service = _service(book_repo, club_repo, link_provider, round_repo=round_repo)
+
+        with pytest.raises(BookLockedInActiveRoundError):
+            await service.remove_book_from_club(SOME_CLUB_ID, SOME_BOOK_ID, SOME_USER_ID)
+
+        club_repo.remove_from_catalog.assert_not_called()
+
+    async def it_rejects_removal_when_the_book_is_in_the_active_rounds_candidate_pool(
+        book_repo: AsyncMock,
+        club_repo: AsyncMock,
+        link_provider: AsyncMock,
+        round_repo: AsyncMock,
+    ):
+        club_repo.find_catalog_entry_by_club_id_and_book_id.return_value = _entry()
+        club_repo.find_member_role_by_club_id_and_user_id.return_value = MemberRole.OWNER
+        round_repo.find_active_by_club_id.return_value = RoundFactory.build(
+            book_id=None,
+            candidate_pool=[CandidatePoolEntry(book_id=SOME_BOOK_ID)],
+        )
+        service = _service(book_repo, club_repo, link_provider, round_repo=round_repo)
+
+        with pytest.raises(BookLockedInActiveRoundError):
+            await service.remove_book_from_club(SOME_CLUB_ID, SOME_BOOK_ID, SOME_USER_ID)
+
+        club_repo.remove_from_catalog.assert_not_called()
+
+    async def it_removes_a_book_not_referenced_by_the_active_round(
+        book_repo: AsyncMock,
+        club_repo: AsyncMock,
+        link_provider: AsyncMock,
+        round_repo: AsyncMock,
+    ):
+        club_repo.find_catalog_entry_by_club_id_and_book_id.return_value = _entry()
+        club_repo.find_member_role_by_club_id_and_user_id.return_value = MemberRole.OWNER
+        round_repo.find_active_by_club_id.return_value = RoundFactory.build(
+            book_id=PydanticObjectId(),
+            candidate_pool=[CandidatePoolEntry(book_id=PydanticObjectId())],
+        )
+        service = _service(book_repo, club_repo, link_provider, round_repo=round_repo)
+
+        await service.remove_book_from_club(SOME_CLUB_ID, SOME_BOOK_ID, SOME_USER_ID)
+
+        club_repo.remove_from_catalog.assert_awaited_once_with(SOME_CLUB_ID, SOME_BOOK_ID)
 
 
 def describe_get_catalog_page():

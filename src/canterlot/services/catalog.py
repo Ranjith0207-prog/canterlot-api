@@ -10,13 +10,19 @@ from canterlot.dto.catalog import (
     SuggestionResponse,
     SuggestionStatus,
 )
-from canterlot.exceptions import BookNotFoundError, ClubSuggestionsClosedError, UnauthorizedClubMemberError
+from canterlot.exceptions import (
+    BookLockedInActiveRoundError,
+    BookNotFoundError,
+    ClubSuggestionsClosedError,
+    UnauthorizedClubMemberError,
+)
 from canterlot.gateways import LinkProvider
 from canterlot.models import BookModel, LinkCandidate
 from canterlot.models.book import SearchParams
 from canterlot.models.club import CatalogEntryModel
+from canterlot.models.round import RoundModel
 from canterlot.pagination import SortDirection
-from canterlot.repositories import BookRepository, ClubRepository, UserRepository
+from canterlot.repositories import BookRepository, ClubRepository, RoundRepository, UserRepository
 from canterlot.types import (
     AuthorList,
     ExtensionType,
@@ -54,11 +60,13 @@ class CatalogService:
         club_repo: ClubRepository,
         user_repo: UserRepository,
         link_providers: list[LinkProvider],
+        round_repo: RoundRepository,
     ):
         self.__book_repo = book_repo
         self.__club_repo = club_repo
         self.__user_repo = user_repo
         self.__link_providers = link_providers
+        self.__round_repo = round_repo
 
     async def suggest_book_to_club(
         self,
@@ -130,8 +138,21 @@ class CatalogService:
                 "Only an OWNER, ADMIN, or the original suggester can remove a book from the catalog."
             )
 
+        active_round = await self.__round_repo.find_active_by_club_id(club_id)
+        if active_round is not None and self.__is_locked_by_round(active_round, book_id):
+            log.warning("Removal rejected: book is locked in by the club's active reading round")
+            raise BookLockedInActiveRoundError(
+                "This book cannot be removed while it is part of the club's active reading round."
+            )
+
         await self.__club_repo.remove_from_catalog(club_id, book_id)
         log.info("Book removed from club catalog successfully")
+
+    @staticmethod
+    def __is_locked_by_round(round_: RoundModel, book_id: PydanticObjectId) -> bool:
+        if round_.book_id == book_id:
+            return True
+        return any(entry.book_id == book_id for entry in round_.candidate_pool)
 
     async def get_catalog_page(
         self,

@@ -6,6 +6,7 @@ from starlette.testclient import TestClient
 
 from canterlot.dto.catalog import CatalogEntryResponse, PaginatedCatalogResponse, SuggestionResponse, SuggestionStatus
 from canterlot.exceptions import (
+    BookLockedInActiveRoundError,
     BookNotFoundError,
     ClubNotFoundError,
     ClubSuggestionsClosedError,
@@ -251,6 +252,21 @@ def describe_remove_from_club():
 
         assert response.status_code == 404
         assert response.json()["error"]["error_code"] == "BOOK_NOT_FOUND"
+
+    def it_returns_409_when_the_book_is_locked_in_the_active_round(
+        client: TestClient,
+        catalog_service: AsyncMock,
+        club_service: AsyncMock,
+        book_service: AsyncMock,
+    ):
+        club_service.get_club_id_by_slug.return_value = SOME_CLUB_ID
+        book_service.get_book_id_by_identifier.return_value = SOME_BOOK_ID
+        catalog_service.remove_book_from_club.side_effect = BookLockedInActiveRoundError("locked in by round")
+
+        response = client.delete(f"/v1/clubs/{SOME_CLUB_SLUG}/catalog/google-books__ext-1")
+
+        assert response.status_code == 409
+        assert response.json()["error"]["error_code"] == "BOOK_LOCKED_IN_ACTIVE_ROUND"
 
     def it_returns_404_when_the_identifier_does_not_resolve_to_any_book(
         client: TestClient,

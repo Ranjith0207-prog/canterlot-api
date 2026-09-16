@@ -5,6 +5,7 @@ from .club import ClubService
 from .dispatch import EmailDispatchService
 from .health import HealthService
 from .invite import InviteService
+from .round import RoundService
 from .user import UserService
 from .verification import VerificationService
 
@@ -16,6 +17,7 @@ __all__ = [
     "EmailDispatchService",
     "HealthService",
     "InviteService",
+    "RoundService",
     "UserService",
     "VerificationService",
 ]
