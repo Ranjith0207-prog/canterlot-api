@@ -4,6 +4,7 @@ from datetime import UTC, date, datetime, time, timedelta
 from typing import cast
 
 from beanie import PydanticObjectId
+from dateutil.relativedelta import relativedelta
 
 from canterlot.dto.round import DeadlineRequest, StartRoundRequest
 from canterlot.exceptions import (
@@ -48,7 +49,7 @@ def _add_duration(base: datetime, duration: DeadlineDuration) -> datetime:
         return base + timedelta(days=duration.value)
     if duration.unit == DeadlineUnit.WEEKS:
         return base + timedelta(weeks=duration.value)
-    return base + timedelta(days=duration.value * 30)  # 1 month = 30 days
+    return base + relativedelta(months=duration.value)
 
 
 @dataclass
