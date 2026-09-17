@@ -27,7 +27,7 @@ class BeanieRoundCompletionRepository(RoundCompletionRepository):
 
         return {projection.user_id for projection in projections}
 
-    @transactional(RoundCompletionModel)
+    @transactional
     async def record_completion(
         self,
         session: AsyncClientSession,
