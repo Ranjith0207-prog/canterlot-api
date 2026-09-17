@@ -121,6 +121,7 @@ xenon:
 # --- Custom Python Verification Scripts ---
 
 check-imports:
+    @echo "{{ info }}Verifying imports and exported symbols...{{ reset }}"
     @uv run python -m tools.check_imports
 
 coverage:
