@@ -21,6 +21,7 @@ from canterlot.repositories import (
     ReadBookRepository,
     RoundCompletionRepository,
     RoundRepository,
+    UserRepository,
 )
 from canterlot.types import (
     DeadlineType,
@@ -29,6 +30,7 @@ from canterlot.types import (
     RoundResolutionMethod,
     RoundSelectionMode,
     RoundStatus,
+    UsernameStr,
 )
 from canterlot.utils import get_logger
 from canterlot.utils.weighting import (
@@ -56,6 +58,12 @@ class RoundDisplay:
     rating_stats: dict[PydanticObjectId, RatingStats]
 
 
+@dataclass
+class MemberProgress:
+    username: UsernameStr
+    finished: bool
+
+
 class RoundService:
     def __init__(
         self,
@@ -64,6 +72,7 @@ class RoundService:
         read_book_repo: ReadBookRepository,
         round_completion_repo: RoundCompletionRepository,
         club_membership_repo: ClubMembershipRepository,
+        user_repo: UserRepository,
         rng: random.Random | None = None,
     ):
         self.__round_repo = round_repo
@@ -71,6 +80,7 @@ class RoundService:
         self.__read_book_repo = read_book_repo
         self.__round_completion_repo = round_completion_repo
         self.__club_membership_repo = club_membership_repo
+        self.__user_repo = user_repo
         self.__rng = rng or random.Random()
 
     async def start_round(
@@ -244,6 +254,72 @@ class RoundService:
         pool_books = [books_by_id[entry.book_id] for entry in round_.candidate_pool]
 
         return RoundDisplay(book=book, pool_books=pool_books, rating_stats=rating_stats)
+
+    async def get_progress(self, club_id: PydanticObjectId, caller_id: PydanticObjectId) -> list[MemberProgress]:
+        log = logger.bind(club_id=str(club_id), caller_id=str(caller_id))
+        await self.__ensure_caller_is_member(club_id, caller_id, log, action="view this club's reading progress")
+        round_ = await self.__get_decided_round(club_id, log)
+
+        current_member_ids = await self.__club_membership_repo.find_active_member_ids_by_club_id(club_id)
+        finished_user_ids = await self.__round_completion_repo.find_user_ids_by_round_id(PydanticObjectId(round_.id))
+        usernames_by_id = await self.__user_repo.get_usernames_by_ids(current_member_ids)
+
+        log.info("Round progress resolved", member_count=len(current_member_ids))
+        return sorted(
+            (
+                MemberProgress(username=usernames_by_id[user_id], finished=user_id in finished_user_ids)
+                for user_id in current_member_ids
+            ),
+            key=lambda entry: entry.username,
+        )
+
+    async def mark_finished(
+        self,
+        club_id: PydanticObjectId,
+        caller_id: PydanticObjectId,
+        rating: float | None,
+        now: datetime,
+    ) -> None:
+        log = logger.bind(club_id=str(club_id), caller_id=str(caller_id), rating=rating)
+        log.info("Marking round finished")
+
+        await self.__ensure_caller_is_member(club_id, caller_id, log, action="mark a book finished")
+        round_ = await self.__get_decided_round(club_id, log)
+        book_id = cast(PydanticObjectId, round_.book_id)
+
+        current_member_ids = set(await self.__club_membership_repo.find_active_member_ids_by_club_id(club_id))
+        result = await self.__round_completion_repo.record_completion(
+            club_id,
+            PydanticObjectId(round_.id),
+            book_id,
+            caller_id,
+            now,
+            current_member_ids,
+        )
+        await self.__read_book_repo.upsert(caller_id, book_id, rating)
+
+        if result.round_concluded:
+            log.info("Round auto-closed: every current member has finished")
+        log.info("Round marked finished for member", is_new=result.is_new)
+
+    async def __get_decided_round(self, club_id: PydanticObjectId, log) -> RoundModel:
+        round_ = await self.__round_repo.find_active_by_club_id(club_id)
+        if round_ is None or round_.status != RoundStatus.DECIDED:
+            log.warning("Rejected: no active round with a decided book")
+            raise RoundNotFoundError("This club has no active reading round with a decided book.")
+
+        return round_
+
+    async def __ensure_caller_is_member(
+        self,
+        club_id: PydanticObjectId,
+        caller_id: PydanticObjectId,
+        log,
+        action: str,
+    ) -> None:
+        if not await self.__club_membership_repo.exists_by_club_id_and_member_user_id(club_id, caller_id):
+            log.warning("Rejected: caller is not a club member", action=action)
+            raise UnauthorizedClubMemberError(f"Only members of this club can {action}.")
 
     async def __ensure_caller_is_owner_or_admin(
         self,

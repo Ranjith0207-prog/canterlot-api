@@ -5,16 +5,34 @@ from beanie import PydanticObjectId
 from fastapi import APIRouter, Depends, Response, status
 
 from canterlot.dto.book import BookResponse
-from canterlot.dto.round import FinalizeRoundRequest, RoundResponse, StartRoundRequest
+from canterlot.dto.round import (
+    FinalizeRoundRequest,
+    MarkRoundFinishedRequest,
+    RoundProgressEntryResponse,
+    RoundProgressResponse,
+    RoundResponse,
+    StartRoundRequest,
+)
 from canterlot.models import BookModel, ClubModel, RatingStats, UserModel
 from canterlot.models.round import RoundModel
-from canterlot.routers.responses import FINALIZE_READING_ROUND_RESPONSES, START_READING_ROUND_RESPONSES
+from canterlot.routers.responses import (
+    FINALIZE_READING_ROUND_RESPONSES,
+    GET_ROUND_PROGRESS_RESPONSES,
+    MARK_ROUND_FINISHED_RESPONSES,
+    START_READING_ROUND_RESPONSES,
+)
 from canterlot.services import RoundService
 
-from .dependencies.providers import get_club_from_slug, get_current_user, get_round_service
+from .dependencies.providers import (
+    get_club_from_slug,
+    get_club_id_from_slug,
+    get_current_user,
+    get_current_user_id,
+    get_round_service,
+)
 from .dependencies.rate_limiter import rate_limit_club_moderation
 
-router = APIRouter(prefix="/clubs/{club_slug}/rounds", tags=["Reading Rounds"])
+router = APIRouter(prefix="/clubs/{club_slug}", tags=["Reading Rounds"])
 
 _START_ROUND_RATE_LIMIT = Depends(rate_limit_club_moderation("start_round"))
 _FINALIZE_ROUND_RATE_LIMIT = Depends(rate_limit_club_moderation("finalize_round"))
@@ -41,7 +59,7 @@ async def _build_response(round_service: RoundService, round_: RoundModel, start
 
 
 @router.post(
-    "",
+    "/rounds",
     operation_id="startReadingRound",
     response_model=RoundResponse,
     status_code=status.HTTP_201_CREATED,
@@ -63,13 +81,13 @@ async def start_reading_round(
         datetime.now(UTC),
     )
 
-    response.headers["Location"] = f"/v1/clubs/{club_slug}/rounds/current"
+    response.headers["Location"] = f"/v1/clubs/{club_slug}/round"
 
     return await _build_response(round_service, round_, current_user.username)
 
 
 @router.patch(
-    "/current",
+    "/round",
     operation_id="finalizeReadingRound",
     response_model=RoundResponse,
     dependencies=[_FINALIZE_ROUND_RATE_LIMIT],
@@ -89,3 +107,37 @@ async def finalize_reading_round(
     )
 
     return await _build_response(round_service, round_, current_user.username)
+
+
+@router.get(
+    "/round/progress",
+    operation_id="getRoundProgress",
+    response_model=RoundProgressResponse,
+    responses=GET_ROUND_PROGRESS_RESPONSES,
+)
+async def get_round_progress(
+    club_id: Annotated[PydanticObjectId, Depends(get_club_id_from_slug)],
+    current_user_id: Annotated[PydanticObjectId, Depends(get_current_user_id)],
+    round_service: Annotated[RoundService, Depends(get_round_service)],
+) -> RoundProgressResponse:
+    progress = await round_service.get_progress(club_id, current_user_id)
+
+    return RoundProgressResponse(
+        entries=[RoundProgressEntryResponse(username=entry.username, finished=entry.finished) for entry in progress]
+    )
+
+
+@router.put(
+    "/round/me",
+    operation_id="markRoundFinished",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=MARK_ROUND_FINISHED_RESPONSES,
+)
+async def mark_round_finished(
+    club_id: Annotated[PydanticObjectId, Depends(get_club_id_from_slug)],
+    current_user_id: Annotated[PydanticObjectId, Depends(get_current_user_id)],
+    round_service: Annotated[RoundService, Depends(get_round_service)],
+    payload: MarkRoundFinishedRequest | None = None,
+) -> None:
+    rating = payload.rating if payload is not None else None
+    await round_service.mark_finished(club_id, current_user_id, rating, datetime.now(UTC))

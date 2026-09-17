@@ -216,6 +216,8 @@ class RoundFactory(BaseDocumentFactory[RoundModel]):
     deadline_duration = None
     deadline = None
     decided_at = None
+    last_completed_by = None
+    last_completed_at = None
 
 
 class RoundCompletionFactory(BaseDocumentFactory[RoundCompletionModel]):

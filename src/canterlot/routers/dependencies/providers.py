@@ -257,8 +257,9 @@ async def get_round_service(
     read_book_repo: Annotated[ReadBookRepository, Depends(get_read_book_repository)],
     round_completion_repo: Annotated[RoundCompletionRepository, Depends(get_round_completion_repository)],
     club_membership_repo: Annotated[ClubMembershipRepository, Depends(get_club_membership_repository)],
+    user_repo: Annotated[UserRepository, Depends(get_user_repository)],
 ) -> RoundService:
-    return RoundService(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+    return RoundService(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo, user_repo)
 
 
 async def get_invite_service(

@@ -751,6 +751,39 @@ FINALIZE_READING_ROUND_RESPONSES: ResponseDict = {
     **RESP_500_INTERNAL,
 }
 
+GET_ROUND_PROGRESS_RESPONSES: ResponseDict = {
+    status.HTTP_200_OK: {"description": "Per-member completion state for the active round."},
+    **RESP_401_AUTH,
+    status.HTTP_403_FORBIDDEN: {
+        "model": ErrorResponseModel,
+        "description": "UnauthorizedClubMemberError: Caller is not a member of this club.",
+        "content": error_example(UnauthorizedClubMemberError),
+    },
+    status.HTTP_404_NOT_FOUND: {
+        "model": ErrorResponseModel,
+        "description": "ClubNotFoundError or RoundNotFoundError: No club, or no active round with a decided book.",
+        "content": error_example(ClubNotFoundError, RoundNotFoundError),
+    },
+    **RESP_500_INTERNAL,
+}
+
+MARK_ROUND_FINISHED_RESPONSES: ResponseDict = {
+    status.HTTP_204_NO_CONTENT: {"description": "Marked finished for the active round (idempotent)."},
+    **RESP_401_AUTH,
+    status.HTTP_403_FORBIDDEN: {
+        "model": ErrorResponseModel,
+        "description": "UnauthorizedClubMemberError: Caller is not a member of this club.",
+        "content": error_example(UnauthorizedClubMemberError),
+    },
+    status.HTTP_404_NOT_FOUND: {
+        "model": ErrorResponseModel,
+        "description": "ClubNotFoundError or RoundNotFoundError: No club, or no active round with a decided book.",
+        "content": error_example(ClubNotFoundError, RoundNotFoundError),
+    },
+    status.HTTP_422_UNPROCESSABLE_CONTENT: {"description": "Validation error on request body fields (rating range)."},
+    **RESP_500_INTERNAL,
+}
+
 GET_PUBLIC_INVITE_RESPONSES: ResponseDict = {
     status.HTTP_200_OK: {"description": "Active public invite token returned."},
     status.HTTP_404_NOT_FOUND: {

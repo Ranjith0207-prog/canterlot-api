@@ -1,9 +1,16 @@
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import ClassVar
 
 from beanie import Document, PydanticObjectId
 from pydantic import Field
 from pymongo import ASCENDING, IndexModel
+
+
+@dataclass
+class CompletionResult:
+    is_new: bool
+    round_concluded: bool
 
 
 class RoundCompletionModel(Document):
