@@ -101,6 +101,7 @@ async def _initiate_replica_set(url: str) -> None:
     finally:
         await probe_client.close()
 
+
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def _beanie_client(mongodb_container: DockerContainer) -> AsyncIterator[AsyncMongoClient]:
     host = mongodb_container.get_container_host_ip()
