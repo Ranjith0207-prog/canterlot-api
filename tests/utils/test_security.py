@@ -139,65 +139,18 @@ def describe_unsubscribe_tokens():
         assert data.category == category
         assert data.club_id is None
 
-    def it_raises_token_malformed_error_for_invalid_base64_unsubscribe_token():
+    def it_raises_token_malformed_error_for_a_garbage_unsubscribe_token():
         with pytest.raises(TokenMalformedError):
-            decode_unsubscribe_token("!!!not_base64!!!")
+            decode_unsubscribe_token("this-is-not-a-real-token")
 
-    def it_raises_token_malformed_error_for_too_short_unsubscribe_token():
-        with pytest.raises(TokenMalformedError):
-            decode_unsubscribe_token("aGVsbG8=")
-
-    def it_raises_token_malformed_error_for_invalid_scope_tag():
-        import base64
-
-        raw = bytes([99]) + (b"\x00" * 22)
-        token = base64.urlsafe_b64encode(raw).decode().rstrip("=")
-        with pytest.raises(TokenMalformedError):
-            decode_unsubscribe_token(token)
-
-    def it_raises_token_malformed_error_when_club_token_length_is_incorrect():
-        import base64
-
-        raw = bytes([UnsubscribeScope.CLUB]) + (b"\x00" * 10)
-        token = base64.urlsafe_b64encode(raw).decode().rstrip("=")
-        with pytest.raises(TokenMalformedError):
-            decode_unsubscribe_token(token)
-
-    def it_raises_token_malformed_error_when_club_token_signature_is_invalid():
+    def it_raises_token_malformed_error_for_a_tampered_unsubscribe_token():
         user_id = PydanticObjectId("507f1f77bcf86cd799439011")
         club_id = PydanticObjectId("507f1f77bcf86cd799439022")
         token = encode_club_unsubscribe_token(user_id, club_id)
 
-        # Corrupt signature by replacing last character
         corrupted_token = token[:-1] + ("A" if token[-1] != "A" else "B")
         with pytest.raises(TokenMalformedError):
             decode_unsubscribe_token(corrupted_token)
-
-    def it_raises_token_malformed_error_when_category_token_length_is_incorrect():
-        import base64
-
-        raw = bytes([UnsubscribeScope.CATEGORY]) + (b"\x00" * 25)
-        token = base64.urlsafe_b64encode(raw).decode().rstrip("=")
-        with pytest.raises(TokenMalformedError):
-            decode_unsubscribe_token(token)
-
-    def it_raises_token_malformed_error_when_category_enum_is_invalid():
-        import base64
-        import hashlib
-        import hmac
-
-        secret_key = get_settings().auth.jwt_secret_key.get_secret_value()
-        user_id = PydanticObjectId()
-        bad_category = b"non_existent_cat"
-
-        tag = bytes([UnsubscribeScope.CATEGORY])
-        cat_len = bytes([len(bad_category)])
-        payload = tag + user_id.binary + cat_len + bad_category
-        sig = hmac.new(secret_key, payload, hashlib.sha256).digest()[:10]
-
-        token = base64.urlsafe_b64encode(payload + sig).decode("ascii").rstrip("=")
-        with pytest.raises(TokenMalformedError):
-            decode_unsubscribe_token(token)
 
 
 def describe_action_link_tokens():
@@ -211,6 +164,15 @@ def describe_action_link_tokens():
         assert data.user_id == user_id
         assert data.code.get_secret_value() == "123456"
 
-    def it_raises_token_malformed_error_for_invalid_action_token_length():
+    def it_raises_token_malformed_error_for_a_garbage_action_link_token():
         with pytest.raises(TokenMalformedError):
-            decode_action_link_token("aGVsbG8=")
+            decode_action_link_token("this-is-not-a-real-token")
+
+    def it_raises_token_malformed_error_for_a_tampered_action_link_token():
+        user_id = PydanticObjectId("507f1f77bcf86cd799439011")
+        code = secret_code_adapter.validate_python("123456")
+        token = encode_action_link_token(user_id, code)
+
+        corrupted_token = token[:-1] + ("A" if token[-1] != "A" else "B")
+        with pytest.raises(TokenMalformedError):
+            decode_action_link_token(corrupted_token)

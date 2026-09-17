@@ -1,5 +1,5 @@
 import resend
-from resend.exceptions import ResendError
+from resend.exceptions import RateLimitError, ResendError
 
 from canterlot.utils import get_logger
 
@@ -33,20 +33,16 @@ class ResendEmailClient(EmailClient):
 
         try:
             response = await resend.Emails.send_async(payload)
+        except RateLimitError as exc:
+            log.warning("Resend API rate limit tripped (429). Triggering queue throttling.")
+            return EmailSendResult(
+                success=False,
+                error_message=str(exc),
+                disabled=True,
+            )
         except ResendError as exc:
-            error_msg = str(exc)
-            is_rate_limited = "429" in error_msg or "rate_limit" in error_msg.lower()
-
-            if is_rate_limited:
-                log.warning("Resend API rate limit tripped (429). Triggering queue throttling.")
-                return EmailSendResult(
-                    success=False,
-                    error_message=error_msg,
-                    disabled=True,
-                )
-
             log.error("Resend send failed with SDK error", error_type=type(exc).__name__, exc_info=True)
-            return EmailSendResult(success=False, error_message=error_msg)
+            return EmailSendResult(success=False, error_message=str(exc))
 
         except Exception as exc:
             log.error(
