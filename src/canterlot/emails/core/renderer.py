@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from jinja2 import Environment, FileSystemLoader, StrictUndefined, select_autoescape
+from jinja2 import Environment, FileSystemLoader, StrictUndefined, Template, UndefinedError, select_autoescape
 
 from canterlot.emails.core import schemas
 from canterlot.emails.core.definitions import EmailTemplate
@@ -45,23 +46,29 @@ class RenderedEmailTemplate[TContext: schemas.BaseEmailContext]:
 
 _ENV = Environment(
     loader=FileSystemLoader(_TEMPLATE_DIR),
-    autoescape=select_autoescape(enabled_extensions=("html.j2", "xml.j2"), default_for_string=True),
+    autoescape=select_autoescape(enabled_extensions=("html.j2", "xml.j2"), default_for_string=False),
     undefined=StrictUndefined,
 )
 
 
-def _format_string(
-    template: str,
+@cache
+def _compiled_string_template(template_str: str) -> Template:
+    return _ENV.from_string(template_str)
+
+
+def _render_field(
+    template_str: str,
     context: dict[str, Any],
     *,
     field_name: str,
     template_enum: EmailTemplate[Any],
 ) -> str:
     try:
-        return template.format(**context)
-    except KeyError as exc:
-        missing = str(exc).strip("'")
-        raise ValueError(f"Missing '{missing}' for {field_name} in email template '{template_enum.name}'.") from exc
+        return _compiled_string_template(template_str).render(context)
+    except UndefinedError as exc:
+        raise ValueError(
+            f"Missing template variable for {field_name} in email template '{template_enum.name}'."
+        ) from exc
 
 
 def _build_headers(context: dict[str, Any]) -> dict[str, str] | None:
@@ -81,18 +88,18 @@ def render_email_template[TContext: schemas.BaseEmailContext](
 ) -> RenderedEmailTemplate[TContext]:
     context_dict = context.model_dump(mode="json")
 
-    subject = _format_string(template.subject_template, context_dict, field_name="subject", template_enum=template)
+    subject = _render_field(template.subject_template, context_dict, field_name="subject", template_enum=template)
 
     render_context = dict(context_dict)
     render_context["subject"] = subject
-    render_context["preheader"] = _format_string(
-        "{subject}",
+    render_context["preheader"] = _render_field(
+        "{{ subject }}",
         render_context,
         field_name="preheader",
         template_enum=template,
     )
-    render_context["heading"] = _format_string(
-        template.heading_template or "{subject}",
+    render_context["heading"] = _render_field(
+        template.heading_template or "{{ subject }}",
         render_context,
         field_name="heading",
         template_enum=template,

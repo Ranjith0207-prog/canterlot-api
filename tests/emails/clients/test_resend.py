@@ -1,5 +1,5 @@
 import resend
-from resend.exceptions import ResendError
+from resend.exceptions import RateLimitError, ResendError
 
 from canterlot.emails import EmailMessage
 from canterlot.emails.clients import ResendEmailClient
@@ -68,11 +68,10 @@ def describe_send():
 
     async def it_handles_resend_rate_limit_error(monkeypatch):
         async def raise_429(_payload):
-            raise ResendError(
-                code=429,
-                message="429 Too Many Requests: rate_limit_exceeded",
+            raise RateLimitError(
+                message="Too many requests, please slow down.",
                 error_type="rate_limit_error",
-                suggested_action="Wait and retry",
+                code=429,
             )
 
         monkeypatch.setattr(resend.Emails, "send_async", raise_429)
@@ -90,7 +89,7 @@ def describe_send():
 
         assert result.success is False
         assert result.disabled is True
-        assert result.error_message is not None and "429" in result.error_message
+        assert result.error_message == "Too many requests, please slow down."
 
     async def it_handles_general_resend_sdk_error(monkeypatch):
         async def raise_sdk_error(_payload):

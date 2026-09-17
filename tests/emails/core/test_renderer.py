@@ -1,27 +1,27 @@
 from typing import Any, cast
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from pydantic.networks import HttpUrl
 
 from canterlot.emails import EmailTemplate, RenderedEmailTemplate, Templates, render_email_template
-from canterlot.emails.core import schemas
+from canterlot.emails.core import renderer, schemas
 from tools.factories import BaseContextFactory
 from tools.factories.emails import SpikeRoleContextFactory
 
 
 @pytest.fixture
-def mock_jinja_env():
-    with patch("canterlot.emails.core.renderer._ENV") as mock_env:
-        mock_jinja_template = MagicMock()
-        mock_jinja_template.render.return_value = "<html>Rendered Email Body</html>"
-        mock_env.get_template.return_value = mock_jinja_template
-        yield mock_env, mock_jinja_template
+def mock_jinja_env(monkeypatch):
+    mock_jinja_template = MagicMock()
+    mock_jinja_template.render.return_value = "<html>Rendered Email Body</html>"
+    mock_get_template = MagicMock(return_value=mock_jinja_template)
+    monkeypatch.setattr(renderer._ENV, "get_template", mock_get_template)
+    yield mock_get_template, mock_jinja_template
 
 
 def describe_render_email_template():
     def it_renders_full_email_template_successfully(mock_jinja_env, random_template: EmailTemplate[Any]):
-        mock_env, mock_jinja_template = mock_jinja_env
+        mock_get_template, mock_jinja_template = mock_jinja_env
 
         context = BaseContextFactory.build_for_template(
             random_template,
@@ -40,11 +40,25 @@ def describe_render_email_template():
         }
         assert result.debug_context == context.model_dump(mode="json")
 
-        mock_env.get_template.assert_called_once_with(random_template.template_path)
+        mock_get_template.assert_called_once_with(random_template.template_path)
 
         called_context = mock_jinja_template.render.call_args[0][0]
         assert called_context["preheader"] == result.subject
         assert called_context["heading"] == (random_template.heading_template or result.subject)
+
+    def it_does_not_html_escape_special_characters_in_subject_and_preheader(mock_jinja_env):
+        _, mock_jinja_template = mock_jinja_env
+        context = BaseContextFactory.build_for_template(
+            Templates.CELESTIA_APPROVED,
+            club_name="Alice's Book & Friends",
+        )
+
+        result = render_email_template(cast(Any, Templates.CELESTIA_APPROVED), context)
+
+        assert result.subject == "You were approved to the Alice's Book & Friends!"
+
+        called_context = mock_jinja_template.render.call_args[0][0]
+        assert called_context["preheader"] == "You were approved to the Alice's Book & Friends!"
 
     def it_raises_value_error_when_subject_string_formatting_fails(
         mock_jinja_env,  # noqa: ARG001

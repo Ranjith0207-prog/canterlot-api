@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from beanie import PydanticObjectId
+from dateutil.relativedelta import relativedelta
 
 from canterlot.dto.round import DeadlineRequest, StartRoundRequest
 from canterlot.exceptions import (
@@ -288,6 +289,35 @@ def describe_start_round():
         assert result.deadline_duration is None
         assert result.deadline == NOW + timedelta(weeks=2)
 
+    async def it_resolves_a_months_preset_deadline_immediately_when_the_book_is_decided_at_creation(
+        round_repo: AsyncMock,
+        book_repo: AsyncMock,
+        read_book_repo: AsyncMock,
+        round_completion_repo: AsyncMock,
+        club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
+        round_repo.find_active_by_club_id.return_value = None
+        book_id = PydanticObjectId()
+        club = _club(catalog=[_catalog_entry(book_id, OWNER_ID)])
+        payload = StartRoundRequest(
+            selection_mode=RoundSelectionMode.RANDOM,
+            deadline=DeadlineRequest(type=DeadlineType.PRESET, value=1, unit=DeadlineUnit.MONTHS),
+        )
+
+        result = await service.start_round(club, OWNER_ID, payload, NOW)
+
+        assert result.deadline_duration is None
+        assert result.deadline == NOW + relativedelta(months=1)
+
     async def it_stores_a_custom_target_date_deadline_immediately_regardless_of_mode(
         round_repo: AsyncMock,
         book_repo: AsyncMock,
@@ -552,8 +582,70 @@ def describe_finalize_round():
 
         result = await service.finalize_round(club, OWNER_ID, RoundResolutionMethod.DRAW, NOW)
 
-        assert result.deadline == NOW + timedelta(days=30)
-        round_repo.finalize_with_draw.assert_awaited_once_with(round_.id, book_id, NOW, NOW + timedelta(days=30))
+        assert result.deadline == NOW + relativedelta(months=1)
+        round_repo.finalize_with_draw.assert_awaited_once_with(round_.id, book_id, NOW, NOW + relativedelta(months=1))
+
+    async def it_resolves_a_months_preset_deadline_across_a_month_end_at_finalize_time(
+        round_repo: AsyncMock,
+        book_repo: AsyncMock,
+        read_book_repo: AsyncMock,
+        round_completion_repo: AsyncMock,
+        club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
+        book_id = PydanticObjectId()
+        book_repo.find_by_ids.return_value = {book_id: BookFactory.build(languages=[])}
+        started_at = datetime(2026, 1, 31, tzinfo=UTC)
+        round_ = _active_round(
+            candidate_pool=[CandidatePoolEntry(book_id=book_id)],
+            deadline_duration=DeadlineDuration(value=1, unit=DeadlineUnit.MONTHS),
+        )
+        round_repo.find_active_by_club_id.return_value = round_
+        round_repo.finalize_with_draw.return_value = True
+        club = _club(catalog=[_catalog_entry(book_id, OWNER_ID)])
+
+        result = await service.finalize_round(club, OWNER_ID, RoundResolutionMethod.DRAW, started_at)
+
+        assert result.deadline == datetime(2026, 2, 28, tzinfo=UTC)
+
+    async def it_resolves_a_multi_month_preset_deadline_without_compounding_drift(
+        round_repo: AsyncMock,
+        book_repo: AsyncMock,
+        read_book_repo: AsyncMock,
+        round_completion_repo: AsyncMock,
+        club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
+        book_id = PydanticObjectId()
+        book_repo.find_by_ids.return_value = {book_id: BookFactory.build(languages=[])}
+        started_at = datetime(2026, 1, 31, tzinfo=UTC)
+        round_ = _active_round(
+            candidate_pool=[CandidatePoolEntry(book_id=book_id)],
+            deadline_duration=DeadlineDuration(value=3, unit=DeadlineUnit.MONTHS),
+        )
+        round_repo.find_active_by_club_id.return_value = round_
+        round_repo.finalize_with_draw.return_value = True
+        club = _club(catalog=[_catalog_entry(book_id, OWNER_ID)])
+
+        result = await service.finalize_round(club, OWNER_ID, RoundResolutionMethod.DRAW, started_at)
+
+        assert result.deadline == datetime(2026, 4, 30, tzinfo=UTC)
 
     async def it_resolves_a_days_preset_at_finalize_time(
         round_repo: AsyncMock,
