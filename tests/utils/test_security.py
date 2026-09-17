@@ -114,6 +114,10 @@ def describe_generate_secure_alphanumeric_code():
         assert code.isnumeric()
 
 
+def _tamper_token(token: str) -> str:
+    return ("A" if token[0] != "A" else "B") + token[1:]
+
+
 def describe_unsubscribe_tokens():
     def it_encodes_and_decodes_club_unsubscribe_tokens():
         user_id = PydanticObjectId("507f1f77bcf86cd799439011")
@@ -148,9 +152,8 @@ def describe_unsubscribe_tokens():
         club_id = PydanticObjectId("507f1f77bcf86cd799439022")
         token = encode_club_unsubscribe_token(user_id, club_id)
 
-        corrupted_token = token[:-1] + ("A" if token[-1] != "A" else "B")
         with pytest.raises(TokenMalformedError):
-            decode_unsubscribe_token(corrupted_token)
+            decode_unsubscribe_token(_tamper_token(token))
 
 
 def describe_action_link_tokens():
@@ -173,6 +176,5 @@ def describe_action_link_tokens():
         code = secret_code_adapter.validate_python("123456")
         token = encode_action_link_token(user_id, code)
 
-        corrupted_token = token[:-1] + ("A" if token[-1] != "A" else "B")
         with pytest.raises(TokenMalformedError):
-            decode_action_link_token(corrupted_token)
+            decode_action_link_token(_tamper_token(token))
