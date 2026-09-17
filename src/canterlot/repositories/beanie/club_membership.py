@@ -136,7 +136,7 @@ class BeanieClubMembershipRepository(ClubMembershipRepository):
 
         return cast(UpdateResult, result).matched_count > 0
 
-    @transactional_or_false(ClubMembershipModel)
+    @transactional_or_false
     async def transfer_ownership(
         self,
         session: AsyncClientSession,
@@ -175,7 +175,7 @@ class BeanieClubMembershipRepository(ClubMembershipRepository):
         if cast(UpdateResult, club_updated).matched_count == 0:
             raise MembershipConflict
 
-    @transactional_or_false(ClubMembershipModel)
+    @transactional_or_false
     async def reclaim_ownership(
         self,
         session: AsyncClientSession,
