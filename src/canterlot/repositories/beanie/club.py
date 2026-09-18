@@ -182,7 +182,7 @@ class BeanieClubRepository(ClubRepository):
     async def remove_from_catalog(self, club_id: PydanticObjectId, book_id: PydanticObjectId) -> None:
         await ClubModel.find_one(ClubModel.id == club_id).update_one(Pull({ClubModel.catalog: {"book_id": book_id}}))
 
-    @transactional(ClubModel)
+    @transactional
     async def save_new_club_with_owner(
         self,
         session: AsyncClientSession,
@@ -231,7 +231,7 @@ class BeanieClubRepository(ClubRepository):
     async def save(self, club: ClubModel) -> ClubModel:
         return await club.save()
 
-    @transactional(ClubModel)
+    @transactional
     async def delete_with_memberships(self, session: AsyncClientSession, club_id: PydanticObjectId) -> None:
         await ClubModel.find_one(ClubModel.id == club_id, session=session).delete(session=session)
         await ClubMembershipModel.find(

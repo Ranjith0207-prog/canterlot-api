@@ -29,6 +29,7 @@ from tools.factories import (
     ClubMembershipFactory,
     InviteFactory,
     ReadBookFactory,
+    RoundCompletionFactory,
     RoundFactory,
     UserFactory,
 )
@@ -193,6 +194,12 @@ async def _seed_clubs(users: dict[str, UserModel], batch_books: list[BookModel],
         status=MembershipStatus.OWNER,
         joined_at=now,
     )
+    await ClubMembershipFactory.create_async(
+        club_id=_get_id(public_hub),
+        user_id=unverified_id,
+        status=MembershipStatus.MEMBER,
+        joined_at=now,
+    )
 
     restricted_hierarchy_catalog = [
         CatalogEntryModel(
@@ -318,7 +325,7 @@ async def _seed_rounds(clubs: list[ClubModel], users: dict[str, UserModel], now:
     public_hub, restricted_hierarchy, protected_transition, _locked_queue = clubs
     standard_id = _get_id(users["standard"])
 
-    await RoundFactory.create_async(
+    public_hub_round = await RoundFactory.create_async(
         club_id=_get_id(public_hub),
         started_by=standard_id,
         selection_mode=RoundSelectionMode.RANDOM,
@@ -326,6 +333,12 @@ async def _seed_rounds(clubs: list[ClubModel], users: dict[str, UserModel], now:
         book_id=public_hub.catalog[0].book_id,
         candidate_pool=[],
         decided_at=now - timedelta(days=1),
+    )
+    await RoundCompletionFactory.create_async(
+        club_id=_get_id(public_hub),
+        round_id=_get_id(public_hub_round),
+        book_id=public_hub.catalog[0].book_id,
+        user_id=standard_id,
     )
 
     await RoundFactory.create_async(

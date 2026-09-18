@@ -47,6 +47,11 @@ class UserService:
         self.__read_book_repo = read_book_repo
         self.__book_repo = book_repo
 
+    def __ensure_write_succeeded(self, changed: bool, log) -> None:
+        if not changed:
+            log.warning("User profile write rejected: user no longer exists at write time")
+            raise InvalidCredentialsError("Authenticated user profile record no longer exists.")
+
     async def _invalidate_email_preferences_cache(self, email: NormalizedEmailStr) -> None:
         await self.__cache_repo.invalidate(EMAIL_PREFERENCES_KEY_TEMPLATE.format(email=email))
 
@@ -99,9 +104,7 @@ class UserService:
             raise UsernameAlreadyExistsError(f"Username '{username}' is already taken.")
 
         changed = await self.__user_repo.update_profile(PydanticObjectId(user.id), name=name, username=username)
-        if not changed:
-            log.warning("Profile update rejected: user no longer exists at write time")
-            raise InvalidCredentialsError("Authenticated user profile record no longer exists.")
+        self.__ensure_write_succeeded(changed, log)
 
         if name is not None:
             user.name = name
@@ -123,9 +126,7 @@ class UserService:
 
         avatar = AvatarSchema(source=source, value=value)
         changed = await self.__user_repo.set_avatar(PydanticObjectId(user.id), avatar)
-        if not changed:
-            log.warning("Avatar update rejected: user no longer exists at write time")
-            raise InvalidCredentialsError("Authenticated user profile record no longer exists.")
+        self.__ensure_write_succeeded(changed, log)
 
         user.avatar = avatar
         log.info("Avatar set to linked provider's photo successfully")
@@ -136,9 +137,7 @@ class UserService:
         log.info("Attempting to clear the active avatar photo")
 
         changed = await self.__user_repo.clear_avatar(user_id)
-        if not changed:
-            log.warning("Avatar clear rejected: user no longer exists at write time")
-            raise InvalidCredentialsError("Authenticated user profile record no longer exists.")
+        self.__ensure_write_succeeded(changed, log)
 
         log.info("Avatar cleared, generated avatar now active")
 
@@ -148,9 +147,7 @@ class UserService:
 
         new_seed = shortuuid.random()
         changed = await self.__user_repo.set_generated_avatar_seed(PydanticObjectId(user.id), new_seed)
-        if not changed:
-            log.warning("Seed regeneration rejected: user no longer exists at write time")
-            raise InvalidCredentialsError("Authenticated user profile record no longer exists.")
+        self.__ensure_write_succeeded(changed, log)
 
         user.generated_avatar_seed = new_seed
         log.info("Generated-avatar seed regenerated successfully")
@@ -185,9 +182,7 @@ class UserService:
             privacy_at=now,
             profile_completed_at=profile_completed_at,
         )
-        if not changed:
-            log.warning("Legal acceptance rejected: user no longer exists at write time")
-            raise InvalidCredentialsError("Authenticated user profile record no longer exists.")
+        self.__ensure_write_succeeded(changed, log)
 
         user.accepted_terms_version = terms_version
         user.accepted_terms_at = now

@@ -31,6 +31,8 @@ class RoundModel(Document):
     started_by: PydanticObjectId
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     decided_at: datetime | None = None
+    last_completed_by: PydanticObjectId | None = None
+    last_completed_at: datetime | None = None
 
     class Settings:
         name = "reading_rounds"

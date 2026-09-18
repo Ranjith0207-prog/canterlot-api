@@ -22,3 +22,5 @@ def describe_round_model():
         assert round_.resolution_method is None
         assert round_.book_id is None
         assert round_.decided_at is None
+        assert round_.last_completed_by is None
+        assert round_.last_completed_at is None

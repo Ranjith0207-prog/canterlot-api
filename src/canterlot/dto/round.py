@@ -45,6 +45,19 @@ class FinalizeRoundRequest(BaseModel):
     resolution_method: RoundResolutionMethod
 
 
+class MarkRoundFinishedRequest(BaseModel):
+    rating: float | None = Field(default=None, ge=0.5, le=5.0, multiple_of=0.5)
+
+
+class RoundProgressEntryResponse(BaseModel):
+    username: UsernameStr
+    finished: bool
+
+
+class RoundProgressResponse(BaseModel):
+    entries: list[RoundProgressEntryResponse]
+
+
 class RoundResponse(BaseModel):
     selection_mode: RoundSelectionMode
     status: RoundStatus

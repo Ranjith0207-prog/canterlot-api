@@ -9,6 +9,7 @@ from canterlot.models import (
     CatalogEntryModel,
     ClubMembershipModel,
     ClubModel,
+    CompletionResult,
     InviteModel,
     LinkedProviderSchema,
     RatingStats,
@@ -370,6 +371,16 @@ class RoundCompletionRepository(Protocol):
         club_id: PydanticObjectId,
         current_member_ids: set[PydanticObjectId],
     ) -> set[PydanticObjectId]: ...
+    async def find_user_ids_by_round_id(self, round_id: PydanticObjectId) -> set[PydanticObjectId]: ...
+    async def record_completion(
+        self,
+        club_id: PydanticObjectId,
+        round_id: PydanticObjectId,
+        book_id: PydanticObjectId,
+        user_id: PydanticObjectId,
+        completed_at: datetime,
+        current_member_ids: set[PydanticObjectId],
+    ) -> CompletionResult: ...
 
 
 class RoundRepository(Protocol):

@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from beanie import PydanticObjectId
+from dateutil.relativedelta import relativedelta
 
 from canterlot.dto.round import DeadlineRequest, StartRoundRequest
 from canterlot.exceptions import (
@@ -14,6 +15,7 @@ from canterlot.exceptions import (
     UnauthorizedClubMemberError,
 )
 from canterlot.models.round import CandidatePoolEntry, DeadlineDuration
+from canterlot.repositories import CompletionResult
 from canterlot.services.round import RoundService
 from canterlot.types import (
     DeadlineType,
@@ -37,6 +39,7 @@ def _service(
     read_book_repo: AsyncMock,
     round_completion_repo: AsyncMock,
     club_membership_repo: AsyncMock,
+    user_repo: AsyncMock,
 ) -> RoundService:
     round_repo.save.side_effect = lambda round_: round_
     book_repo.find_by_ids.return_value = {}
@@ -45,12 +48,14 @@ def _service(
     round_completion_repo.find_majority_excluded_book_ids.return_value = set()
     club_membership_repo.find_member_role_by_club_id_and_user_id.return_value = MemberRole.OWNER
     club_membership_repo.find_active_member_ids_by_club_id.return_value = [OWNER_ID]
+    club_membership_repo.exists_by_club_id_and_member_user_id.return_value = True
     return RoundService(
         round_repo,
         book_repo,
         read_book_repo,
         round_completion_repo,
         club_membership_repo,
+        user_repo,
         rng=random.Random(1),
     )
 
@@ -74,8 +79,16 @@ def describe_start_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         club_membership_repo.find_member_role_by_club_id_and_user_id.return_value = MemberRole.MEMBER
         club = _club()
         payload = StartRoundRequest(selection_mode=RoundSelectionMode.RANDOM)
@@ -89,8 +102,16 @@ def describe_start_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         round_repo.find_active_by_club_id.return_value = RoundFactory.build(status=RoundStatus.SETUP)
         club = _club()
         payload = StartRoundRequest(selection_mode=RoundSelectionMode.RANDOM)
@@ -104,8 +125,16 @@ def describe_start_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         round_repo.find_active_by_club_id.return_value = None
         club = _club(catalog=[])
         payload = StartRoundRequest(selection_mode=RoundSelectionMode.CURATED)
@@ -119,8 +148,16 @@ def describe_start_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         round_repo.find_active_by_club_id.return_value = None
         book_id = PydanticObjectId()
         club = _club(catalog=[_catalog_entry(book_id, OWNER_ID)])
@@ -136,8 +173,16 @@ def describe_start_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         round_repo.find_active_by_club_id.return_value = None
         book_id = PydanticObjectId()
         club = _club(catalog=[_catalog_entry(book_id, OWNER_ID)])
@@ -157,8 +202,16 @@ def describe_start_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         round_repo.find_active_by_club_id.return_value = None
         book_a, book_b = PydanticObjectId(), PydanticObjectId()
         book_repo.find_by_ids.return_value = {
@@ -182,8 +235,16 @@ def describe_start_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         round_repo.find_active_by_club_id.return_value = None
         book_a, book_b = PydanticObjectId(), PydanticObjectId()
         book_repo.find_by_ids.return_value = {
@@ -205,8 +266,16 @@ def describe_start_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         round_repo.find_active_by_club_id.return_value = None
         book_id = PydanticObjectId()
         club = _club(catalog=[_catalog_entry(book_id, OWNER_ID)])
@@ -220,14 +289,51 @@ def describe_start_round():
         assert result.deadline_duration is None
         assert result.deadline == NOW + timedelta(weeks=2)
 
+    async def it_resolves_a_months_preset_deadline_immediately_when_the_book_is_decided_at_creation(
+        round_repo: AsyncMock,
+        book_repo: AsyncMock,
+        read_book_repo: AsyncMock,
+        round_completion_repo: AsyncMock,
+        club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
+        round_repo.find_active_by_club_id.return_value = None
+        book_id = PydanticObjectId()
+        club = _club(catalog=[_catalog_entry(book_id, OWNER_ID)])
+        payload = StartRoundRequest(
+            selection_mode=RoundSelectionMode.RANDOM,
+            deadline=DeadlineRequest(type=DeadlineType.PRESET, value=1, unit=DeadlineUnit.MONTHS),
+        )
+
+        result = await service.start_round(club, OWNER_ID, payload, NOW)
+
+        assert result.deadline_duration is None
+        assert result.deadline == NOW + relativedelta(months=1)
+
     async def it_stores_a_custom_target_date_deadline_immediately_regardless_of_mode(
         round_repo: AsyncMock,
         book_repo: AsyncMock,
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         round_repo.find_active_by_club_id.return_value = None
         book_a, book_b = PydanticObjectId(), PydanticObjectId()
         book_repo.find_by_ids.return_value = {
@@ -252,8 +358,16 @@ def describe_start_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         round_repo.find_active_by_club_id.return_value = None
         book_a, book_b = PydanticObjectId(), PydanticObjectId()
         book_repo.find_by_ids.return_value = {
@@ -292,8 +406,16 @@ def describe_finalize_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         club_membership_repo.find_member_role_by_club_id_and_user_id.return_value = MemberRole.MEMBER
         club = _club()
 
@@ -306,8 +428,16 @@ def describe_finalize_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         round_repo.find_active_by_club_id.return_value = None
         club = _club()
 
@@ -320,8 +450,16 @@ def describe_finalize_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         round_repo.find_active_by_club_id.return_value = _active_round(status=RoundStatus.VOTING)
         club = _club()
 
@@ -334,8 +472,16 @@ def describe_finalize_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         book_a, book_b = PydanticObjectId(), PydanticObjectId()
         book_repo.find_by_ids.return_value = {
             book_a: BookFactory.build(languages=[]),
@@ -360,8 +506,16 @@ def describe_finalize_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         round_ = _active_round()
         round_repo.find_active_by_club_id.return_value = round_
         round_repo.finalize_with_vote.return_value = True
@@ -380,8 +534,16 @@ def describe_finalize_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         book_id = PydanticObjectId()
         book_repo.find_by_ids.return_value = {book_id: BookFactory.build(languages=[])}
         round_ = _active_round(candidate_pool=[CandidatePoolEntry(book_id=book_id)])
@@ -398,8 +560,16 @@ def describe_finalize_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         book_id = PydanticObjectId()
         book_repo.find_by_ids.return_value = {book_id: BookFactory.build(languages=[])}
         round_ = _active_round(
@@ -412,8 +582,70 @@ def describe_finalize_round():
 
         result = await service.finalize_round(club, OWNER_ID, RoundResolutionMethod.DRAW, NOW)
 
-        assert result.deadline == NOW + timedelta(days=30)
-        round_repo.finalize_with_draw.assert_awaited_once_with(round_.id, book_id, NOW, NOW + timedelta(days=30))
+        assert result.deadline == NOW + relativedelta(months=1)
+        round_repo.finalize_with_draw.assert_awaited_once_with(round_.id, book_id, NOW, NOW + relativedelta(months=1))
+
+    async def it_resolves_a_months_preset_deadline_across_a_month_end_at_finalize_time(
+        round_repo: AsyncMock,
+        book_repo: AsyncMock,
+        read_book_repo: AsyncMock,
+        round_completion_repo: AsyncMock,
+        club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
+        book_id = PydanticObjectId()
+        book_repo.find_by_ids.return_value = {book_id: BookFactory.build(languages=[])}
+        started_at = datetime(2026, 1, 31, tzinfo=UTC)
+        round_ = _active_round(
+            candidate_pool=[CandidatePoolEntry(book_id=book_id)],
+            deadline_duration=DeadlineDuration(value=1, unit=DeadlineUnit.MONTHS),
+        )
+        round_repo.find_active_by_club_id.return_value = round_
+        round_repo.finalize_with_draw.return_value = True
+        club = _club(catalog=[_catalog_entry(book_id, OWNER_ID)])
+
+        result = await service.finalize_round(club, OWNER_ID, RoundResolutionMethod.DRAW, started_at)
+
+        assert result.deadline == datetime(2026, 2, 28, tzinfo=UTC)
+
+    async def it_resolves_a_multi_month_preset_deadline_without_compounding_drift(
+        round_repo: AsyncMock,
+        book_repo: AsyncMock,
+        read_book_repo: AsyncMock,
+        round_completion_repo: AsyncMock,
+        club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
+        book_id = PydanticObjectId()
+        book_repo.find_by_ids.return_value = {book_id: BookFactory.build(languages=[])}
+        started_at = datetime(2026, 1, 31, tzinfo=UTC)
+        round_ = _active_round(
+            candidate_pool=[CandidatePoolEntry(book_id=book_id)],
+            deadline_duration=DeadlineDuration(value=3, unit=DeadlineUnit.MONTHS),
+        )
+        round_repo.find_active_by_club_id.return_value = round_
+        round_repo.finalize_with_draw.return_value = True
+        club = _club(catalog=[_catalog_entry(book_id, OWNER_ID)])
+
+        result = await service.finalize_round(club, OWNER_ID, RoundResolutionMethod.DRAW, started_at)
+
+        assert result.deadline == datetime(2026, 4, 30, tzinfo=UTC)
 
     async def it_resolves_a_days_preset_at_finalize_time(
         round_repo: AsyncMock,
@@ -421,8 +653,16 @@ def describe_finalize_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         book_id = PydanticObjectId()
         book_repo.find_by_ids.return_value = {book_id: BookFactory.build(languages=[])}
         round_ = _active_round(
@@ -443,8 +683,16 @@ def describe_finalize_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         round_repo.find_active_by_club_id.return_value = _active_round()
         round_repo.finalize_with_vote.return_value = False
         club = _club()
@@ -458,8 +706,16 @@ def describe_finalize_round():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         round_ = _active_round(deadline_duration=DeadlineDuration(value=2, unit=DeadlineUnit.WEEKS))
         round_repo.find_active_by_club_id.return_value = round_
         round_repo.finalize_with_vote.return_value = True
@@ -478,8 +734,16 @@ def describe_resolve_display():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         round_ = RoundFactory.build(book_id=None, candidate_pool=[])
 
         display = await service.resolve_display(round_)
@@ -495,8 +759,16 @@ def describe_resolve_display():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         book_id = PydanticObjectId()
         book = BookFactory.build(id=book_id)
         book_repo.find_by_ids.return_value = {book_id: book}
@@ -513,8 +785,16 @@ def describe_resolve_display():
         read_book_repo: AsyncMock,
         round_completion_repo: AsyncMock,
         club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
     ):
-        service = _service(round_repo, book_repo, read_book_repo, round_completion_repo, club_membership_repo)
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
         book_a, book_b = PydanticObjectId(), PydanticObjectId()
         books = {book_a: BookFactory.build(id=book_a), book_b: BookFactory.build(id=book_b)}
         book_repo.find_by_ids.return_value = books
@@ -527,3 +807,251 @@ def describe_resolve_display():
 
         assert display.book is None
         assert {book.id for book in display.pool_books} == {book_a, book_b}
+
+
+def describe_get_progress():
+    async def it_lists_every_current_member_with_their_finished_state(
+        round_repo: AsyncMock,
+        book_repo: AsyncMock,
+        read_book_repo: AsyncMock,
+        round_completion_repo: AsyncMock,
+        club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
+        book_id = PydanticObjectId()
+        round_id = PydanticObjectId()
+        finished_member, unfinished_member = PydanticObjectId(), PydanticObjectId()
+        round_repo.find_active_by_club_id.return_value = RoundFactory.build(
+            id=round_id,
+            club_id=SOME_CLUB_ID,
+            status=RoundStatus.DECIDED,
+            book_id=book_id,
+            candidate_pool=[],
+        )
+        club_membership_repo.find_active_member_ids_by_club_id.return_value = [finished_member, unfinished_member]
+        round_completion_repo.find_user_ids_by_round_id.return_value = {finished_member}
+        user_repo.get_usernames_by_ids.return_value = {finished_member: "alice", unfinished_member: "bob"}
+
+        progress = await service.get_progress(SOME_CLUB_ID, finished_member)
+
+        assert {(entry.username, entry.finished) for entry in progress} == {("alice", True), ("bob", False)}
+
+    async def it_raises_round_not_found_when_no_decided_round_exists(
+        round_repo: AsyncMock,
+        book_repo: AsyncMock,
+        read_book_repo: AsyncMock,
+        round_completion_repo: AsyncMock,
+        club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
+        round_repo.find_active_by_club_id.return_value = None
+
+        with pytest.raises(RoundNotFoundError):
+            await service.get_progress(SOME_CLUB_ID, MEMBER_ID)
+
+    async def it_raises_round_not_found_when_the_round_is_still_in_setup_or_voting(
+        round_repo: AsyncMock,
+        book_repo: AsyncMock,
+        read_book_repo: AsyncMock,
+        round_completion_repo: AsyncMock,
+        club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
+        round_repo.find_active_by_club_id.return_value = RoundFactory.build(
+            club_id=SOME_CLUB_ID,
+            status=RoundStatus.SETUP,
+            book_id=None,
+            candidate_pool=[],
+        )
+
+        with pytest.raises(RoundNotFoundError):
+            await service.get_progress(SOME_CLUB_ID, MEMBER_ID)
+
+    async def it_raises_unauthorized_when_caller_is_not_a_member(
+        round_repo: AsyncMock,
+        book_repo: AsyncMock,
+        read_book_repo: AsyncMock,
+        round_completion_repo: AsyncMock,
+        club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
+        club_membership_repo.exists_by_club_id_and_member_user_id.return_value = False
+
+        with pytest.raises(UnauthorizedClubMemberError):
+            await service.get_progress(SOME_CLUB_ID, MEMBER_ID)
+
+
+def describe_mark_finished():
+    async def it_records_a_completion_and_upserts_the_read_book_history(
+        round_repo: AsyncMock,
+        book_repo: AsyncMock,
+        read_book_repo: AsyncMock,
+        round_completion_repo: AsyncMock,
+        club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
+        book_id = PydanticObjectId()
+        round_id = PydanticObjectId()
+        club_membership_repo.find_active_member_ids_by_club_id.return_value = [MEMBER_ID]
+        round_repo.find_active_by_club_id.return_value = RoundFactory.build(
+            id=round_id,
+            club_id=SOME_CLUB_ID,
+            status=RoundStatus.DECIDED,
+            book_id=book_id,
+            candidate_pool=[],
+        )
+        round_completion_repo.record_completion.return_value = CompletionResult(is_new=True, round_concluded=False)
+
+        await service.mark_finished(SOME_CLUB_ID, MEMBER_ID, 4.5, NOW)
+
+        round_completion_repo.record_completion.assert_awaited_once_with(
+            SOME_CLUB_ID,
+            round_id,
+            book_id,
+            MEMBER_ID,
+            NOW,
+            {MEMBER_ID},
+        )
+        read_book_repo.upsert.assert_awaited_once_with(MEMBER_ID, book_id, 4.5)
+
+    async def it_still_updates_the_rating_on_a_replayed_call(
+        round_repo: AsyncMock,
+        book_repo: AsyncMock,
+        read_book_repo: AsyncMock,
+        round_completion_repo: AsyncMock,
+        club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
+        book_id = PydanticObjectId()
+        club_membership_repo.find_active_member_ids_by_club_id.return_value = [MEMBER_ID]
+        round_repo.find_active_by_club_id.return_value = RoundFactory.build(
+            club_id=SOME_CLUB_ID,
+            status=RoundStatus.DECIDED,
+            book_id=book_id,
+            candidate_pool=[],
+        )
+        round_completion_repo.record_completion.return_value = CompletionResult(is_new=False, round_concluded=False)
+
+        await service.mark_finished(SOME_CLUB_ID, MEMBER_ID, 3.0, NOW)
+
+        read_book_repo.upsert.assert_awaited_once_with(MEMBER_ID, book_id, 3.0)
+
+    async def it_still_upserts_the_read_book_history_when_the_round_auto_closes(
+        round_repo: AsyncMock,
+        book_repo: AsyncMock,
+        read_book_repo: AsyncMock,
+        round_completion_repo: AsyncMock,
+        club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
+        book_id = PydanticObjectId()
+        club_membership_repo.find_active_member_ids_by_club_id.return_value = [MEMBER_ID]
+        round_repo.find_active_by_club_id.return_value = RoundFactory.build(
+            club_id=SOME_CLUB_ID,
+            status=RoundStatus.DECIDED,
+            book_id=book_id,
+            candidate_pool=[],
+        )
+        round_completion_repo.record_completion.return_value = CompletionResult(is_new=True, round_concluded=True)
+
+        await service.mark_finished(SOME_CLUB_ID, MEMBER_ID, None, NOW)
+
+        read_book_repo.upsert.assert_awaited_once_with(MEMBER_ID, book_id, None)
+
+    async def it_raises_round_not_found_when_no_decided_round_exists(
+        round_repo: AsyncMock,
+        book_repo: AsyncMock,
+        read_book_repo: AsyncMock,
+        round_completion_repo: AsyncMock,
+        club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
+        round_repo.find_active_by_club_id.return_value = None
+
+        with pytest.raises(RoundNotFoundError):
+            await service.mark_finished(SOME_CLUB_ID, MEMBER_ID, None, NOW)
+
+    async def it_raises_unauthorized_when_caller_is_not_a_member(
+        round_repo: AsyncMock,
+        book_repo: AsyncMock,
+        read_book_repo: AsyncMock,
+        round_completion_repo: AsyncMock,
+        club_membership_repo: AsyncMock,
+        user_repo: AsyncMock,
+    ):
+        service = _service(
+            round_repo,
+            book_repo,
+            read_book_repo,
+            round_completion_repo,
+            club_membership_repo,
+            user_repo,
+        )
+        club_membership_repo.exists_by_club_id_and_member_user_id.return_value = False
+
+        with pytest.raises(UnauthorizedClubMemberError):
+            await service.mark_finished(SOME_CLUB_ID, MEMBER_ID, None, NOW)

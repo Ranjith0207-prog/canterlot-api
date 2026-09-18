@@ -1,10 +1,93 @@
-from beanie import PydanticObjectId
+from datetime import datetime
+from typing import cast
 
-from canterlot.models import RoundCompletionModel
-from canterlot.repositories import RoundCompletionRepository
+from beanie import PydanticObjectId
+from beanie.operators import In
+from pydantic import BaseModel
+from pymongo.asynchronous.client_session import AsyncClientSession
+from pymongo.results import UpdateResult
+
+from canterlot.models import RoundCompletionModel, RoundModel
+from canterlot.repositories import CompletionResult, RoundCompletionRepository
+from canterlot.repositories.beanie.transactions import transactional
+from canterlot.types import RoundStatus
+
+
+class UserIdProjection(BaseModel):
+    user_id: PydanticObjectId
 
 
 class BeanieRoundCompletionRepository(RoundCompletionRepository):
+    async def find_user_ids_by_round_id(self, round_id: PydanticObjectId) -> set[PydanticObjectId]:
+        projections = (
+            await RoundCompletionModel.find(RoundCompletionModel.round_id == round_id)
+            .project(UserIdProjection)
+            .to_list()
+        )
+
+        return {projection.user_id for projection in projections}
+
+    @transactional
+    async def record_completion(
+        self,
+        session: AsyncClientSession,
+        club_id: PydanticObjectId,
+        round_id: PydanticObjectId,
+        book_id: PydanticObjectId,
+        user_id: PydanticObjectId,
+        completed_at: datetime,
+        current_member_ids: set[PydanticObjectId],
+    ) -> CompletionResult:
+        insert_result = await RoundCompletionModel.find_one(
+            RoundCompletionModel.round_id == round_id,
+            RoundCompletionModel.user_id == user_id,
+            session=session,
+        ).update_one(
+            {
+                "$setOnInsert": {
+                    "club_id": club_id,
+                    "round_id": round_id,
+                    "book_id": book_id,
+                    "user_id": user_id,
+                    "completed_at": completed_at,
+                }
+            },
+            upsert=True,
+            session=session,
+        )
+        is_new = cast(UpdateResult, insert_result).upserted_id is not None
+        if not is_new:
+            return CompletionResult(is_new=False, round_concluded=False)
+
+        # Written before counting (not after) so concurrent finishers serialize on this
+        # transaction conflict instead of racing the count below.
+        lock_result = await RoundModel.find_one(
+            RoundModel.id == round_id,
+            RoundModel.status == RoundStatus.DECIDED,
+            session=session,
+        ).update_one(
+            {"$set": {"last_completed_by": user_id, "last_completed_at": completed_at}},
+            session=session,
+        )
+        if cast(UpdateResult, lock_result).matched_count == 0:
+            return CompletionResult(is_new=True, round_concluded=False)
+
+        finisher_count = await RoundCompletionModel.find(
+            RoundCompletionModel.round_id == round_id,
+            In(RoundCompletionModel.user_id, list(current_member_ids)),
+            session=session,
+        ).count()
+        if finisher_count < len(current_member_ids):
+            return CompletionResult(is_new=True, round_concluded=False)
+
+        conclude_result = await RoundModel.find_one(
+            RoundModel.id == round_id,
+            RoundModel.status == RoundStatus.DECIDED,
+            session=session,
+        ).update_one({"$set": {"status": RoundStatus.CONCLUDED}}, session=session)
+
+        return CompletionResult(is_new=True, round_concluded=cast(UpdateResult, conclude_result).matched_count > 0)
+
     async def find_majority_excluded_book_ids(
         self,
         club_id: PydanticObjectId,

@@ -12,12 +12,13 @@ from canterlot.exceptions import (
     UnauthorizedClubMemberError,
 )
 from canterlot.models.round import CandidatePoolEntry
-from canterlot.services.round import RoundDisplay
+from canterlot.services.round import MemberProgress, RoundDisplay
 from canterlot.types import RoundResolutionMethod, RoundSelectionMode, RoundStatus
 from tools.factories import BookFactory, ClubFactory, RoundFactory
 
 SOME_CLUB_SLUG = "book-club"
 SOME_BOOK_ID = PydanticObjectId("507f1f77bcf86cd799439020")
+SOME_USER_ID = PydanticObjectId("507f1f77bcf86cd799439011")
 
 
 def _round(**overrides):
@@ -50,7 +51,7 @@ def describe_start_reading_round():
         response = client.post(f"/v1/clubs/{SOME_CLUB_SLUG}/rounds", json={"selection_mode": "RANDOM"})
 
         assert response.status_code == 201
-        assert response.headers["Location"] == f"/v1/clubs/{SOME_CLUB_SLUG}/rounds/current"
+        assert response.headers["Location"] == f"/v1/clubs/{SOME_CLUB_SLUG}/round"
         body = response.json()
         assert body["status"] == "DECIDED"
         assert body["book"]["external_id"]
@@ -142,7 +143,7 @@ def describe_finalize_reading_round():
         )
 
         response = client.patch(
-            f"/v1/clubs/{SOME_CLUB_SLUG}/rounds/current",
+            f"/v1/clubs/{SOME_CLUB_SLUG}/round",
             json={"resolution_method": "DRAW"},
         )
 
@@ -167,7 +168,7 @@ def describe_finalize_reading_round():
         round_service.resolve_display.return_value = RoundDisplay(book=None, pool_books=[], rating_stats={})
 
         response = client.patch(
-            f"/v1/clubs/{SOME_CLUB_SLUG}/rounds/current",
+            f"/v1/clubs/{SOME_CLUB_SLUG}/round",
             json={"resolution_method": "VOTE"},
         )
 
@@ -185,7 +186,7 @@ def describe_finalize_reading_round():
         round_service.finalize_round.side_effect = RoundNotFoundError("No active round.")
 
         response = client.patch(
-            f"/v1/clubs/{SOME_CLUB_SLUG}/rounds/current",
+            f"/v1/clubs/{SOME_CLUB_SLUG}/round",
             json={"resolution_method": "DRAW"},
         )
 
@@ -200,7 +201,7 @@ def describe_finalize_reading_round():
         round_service.finalize_round.side_effect = RoundAlreadyFinalizedError("Already finalized.")
 
         response = client.patch(
-            f"/v1/clubs/{SOME_CLUB_SLUG}/rounds/current",
+            f"/v1/clubs/{SOME_CLUB_SLUG}/round",
             json={"resolution_method": "DRAW"},
         )
 
@@ -215,8 +216,130 @@ def describe_finalize_reading_round():
         round_service.finalize_round.side_effect = UnauthorizedClubMemberError("Not allowed.")
 
         response = client.patch(
-            f"/v1/clubs/{SOME_CLUB_SLUG}/rounds/current",
+            f"/v1/clubs/{SOME_CLUB_SLUG}/round",
             json={"resolution_method": "DRAW"},
         )
 
         assert response.status_code == 403
+
+
+def describe_get_round_progress():
+    def it_returns_every_current_members_finished_state(
+        client: TestClient,
+        club_service: AsyncMock,
+        round_service: AsyncMock,
+    ):
+        club_service.get_club_id_by_slug.return_value = PydanticObjectId()
+        round_service.get_progress.return_value = [
+            MemberProgress(username="alice", finished=True),
+            MemberProgress(username="bob", finished=False),
+        ]
+
+        response = client.get(f"/v1/clubs/{SOME_CLUB_SLUG}/round/progress")
+
+        assert response.status_code == 200
+        assert response.json() == {
+            "entries": [
+                {"username": "alice", "finished": True},
+                {"username": "bob", "finished": False},
+            ]
+        }
+
+    def it_returns_404_when_the_club_does_not_exist(client: TestClient, club_service: AsyncMock):
+        club_service.get_club_id_by_slug.side_effect = ClubNotFoundError("This club no longer exists.")
+
+        response = client.get(f"/v1/clubs/{SOME_CLUB_SLUG}/round/progress")
+
+        assert response.status_code == 404
+
+    def it_returns_404_when_no_decided_round_exists(
+        client: TestClient,
+        club_service: AsyncMock,
+        round_service: AsyncMock,
+    ):
+        club_service.get_club_id_by_slug.return_value = PydanticObjectId()
+        round_service.get_progress.side_effect = RoundNotFoundError("No active round.")
+
+        response = client.get(f"/v1/clubs/{SOME_CLUB_SLUG}/round/progress")
+
+        assert response.status_code == 404
+
+    def it_returns_403_when_caller_is_not_a_member(
+        client: TestClient,
+        club_service: AsyncMock,
+        round_service: AsyncMock,
+    ):
+        club_service.get_club_id_by_slug.return_value = PydanticObjectId()
+        round_service.get_progress.side_effect = UnauthorizedClubMemberError("Not a member.")
+
+        response = client.get(f"/v1/clubs/{SOME_CLUB_SLUG}/round/progress")
+
+        assert response.status_code == 403
+
+
+def describe_mark_round_finished():
+    def it_marks_the_caller_finished_and_returns_204(
+        client: TestClient,
+        club_service: AsyncMock,
+        round_service: AsyncMock,
+    ):
+        club_service.get_club_id_by_slug.return_value = PydanticObjectId()
+
+        response = client.put(f"/v1/clubs/{SOME_CLUB_SLUG}/round/me", json={"rating": 4.5})
+
+        assert response.status_code == 204
+        round_service.mark_finished.assert_awaited_once()
+        args = round_service.mark_finished.await_args.args
+        assert args[1] == SOME_USER_ID
+        assert args[2] == 4.5
+
+    def it_allows_an_empty_body_with_no_rating(
+        client: TestClient,
+        club_service: AsyncMock,
+        round_service: AsyncMock,
+    ):
+        club_service.get_club_id_by_slug.return_value = PydanticObjectId()
+
+        response = client.put(f"/v1/clubs/{SOME_CLUB_SLUG}/round/me")
+
+        assert response.status_code == 204
+        args = round_service.mark_finished.await_args.args
+        assert args[2] is None
+
+    def it_returns_404_when_the_club_does_not_exist(client: TestClient, club_service: AsyncMock):
+        club_service.get_club_id_by_slug.side_effect = ClubNotFoundError("This club no longer exists.")
+
+        response = client.put(f"/v1/clubs/{SOME_CLUB_SLUG}/round/me")
+
+        assert response.status_code == 404
+
+    def it_returns_404_when_no_decided_round_exists(
+        client: TestClient,
+        club_service: AsyncMock,
+        round_service: AsyncMock,
+    ):
+        club_service.get_club_id_by_slug.return_value = PydanticObjectId()
+        round_service.mark_finished.side_effect = RoundNotFoundError("No active round.")
+
+        response = client.put(f"/v1/clubs/{SOME_CLUB_SLUG}/round/me")
+
+        assert response.status_code == 404
+
+    def it_returns_403_when_caller_is_not_a_member(
+        client: TestClient,
+        club_service: AsyncMock,
+        round_service: AsyncMock,
+    ):
+        club_service.get_club_id_by_slug.return_value = PydanticObjectId()
+        round_service.mark_finished.side_effect = UnauthorizedClubMemberError("Not a member.")
+
+        response = client.put(f"/v1/clubs/{SOME_CLUB_SLUG}/round/me")
+
+        assert response.status_code == 403
+
+    def it_returns_422_for_an_out_of_range_rating(client: TestClient, club_service: AsyncMock):
+        club_service.get_club_id_by_slug.return_value = PydanticObjectId()
+
+        response = client.put(f"/v1/clubs/{SOME_CLUB_SLUG}/round/me", json={"rating": 6.0})
+
+        assert response.status_code == 422

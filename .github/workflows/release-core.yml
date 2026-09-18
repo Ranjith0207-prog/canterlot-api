@@ -126,6 +126,14 @@ jobs:
             --commit --tag --changelog --push --vcs-release \
             ${{ inputs.force_major && '--major' || '' }}
 
+      - name: Attach OpenAPI Specification to the Release
+        if: ${{ !inputs.dry_run && steps.version.outputs.release-due == 'true' }}
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          gh release upload "v${{ steps.version.outputs.version }}" openapi.json \
+            --repo "${{ github.repository }}"
+
       - name: Promote develop to Main
         if: ${{ !inputs.dry_run }}
         run: |

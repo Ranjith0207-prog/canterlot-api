@@ -1,12 +1,27 @@
+from datetime import UTC, datetime
+
 import pytest
 from beanie import PydanticObjectId
 
+from canterlot.models.round import RoundModel
 from canterlot.repositories.beanie.round_completion import BeanieRoundCompletionRepository
-from tools.factories import RoundCompletionFactory
+from canterlot.types import RoundSelectionMode, RoundStatus
+from tools.factories import RoundCompletionFactory, RoundFactory
 
 pytestmark = pytest.mark.asyncio(loop_scope="session")
 
 repo = BeanieRoundCompletionRepository()
+
+
+async def _decided_round(club_id: PydanticObjectId, book_id: PydanticObjectId) -> RoundModel:
+    return await RoundFactory.create_async(
+        club_id=club_id,
+        started_by=PydanticObjectId(),
+        selection_mode=RoundSelectionMode.RANDOM,
+        status=RoundStatus.DECIDED,
+        book_id=book_id,
+        candidate_pool=[],
+    )
 
 
 def _id(document) -> PydanticObjectId:
@@ -104,3 +119,141 @@ def describe_find_majority_excluded_book_ids():
         excluded = await repo.find_majority_excluded_book_ids(club_id, {PydanticObjectId()})
 
         assert excluded == set()
+
+
+def describe_find_user_ids_by_round_id():
+    async def it_returns_the_set_of_user_ids_who_completed_a_round():
+        round_id = PydanticObjectId()
+        finisher_a, finisher_b = PydanticObjectId(), PydanticObjectId()
+        for user_id in (finisher_a, finisher_b):
+            await RoundCompletionFactory.create_async(
+                club_id=PydanticObjectId(),
+                round_id=round_id,
+                book_id=PydanticObjectId(),
+                user_id=user_id,
+            )
+
+        finishers = await repo.find_user_ids_by_round_id(round_id)
+
+        assert finishers == {finisher_a, finisher_b}
+
+    async def it_returns_an_empty_set_when_nobody_has_finished():
+        finishers = await repo.find_user_ids_by_round_id(PydanticObjectId())
+
+        assert finishers == set()
+
+
+def describe_record_completion():
+    async def it_records_a_new_completion_and_does_not_conclude_when_members_remain():
+        club_id = PydanticObjectId()
+        book_id = PydanticObjectId()
+        finisher, still_reading = PydanticObjectId(), PydanticObjectId()
+        round_ = await _decided_round(club_id, book_id)
+        round_id = PydanticObjectId(round_.id)
+
+        result = await repo.record_completion(
+            club_id,
+            round_id,
+            book_id,
+            finisher,
+            datetime.now(UTC),
+            {finisher, still_reading},
+        )
+
+        assert result.is_new is True
+        assert result.round_concluded is False
+        assert await repo.find_user_ids_by_round_id(round_id) == {finisher}
+        refreshed = await RoundModel.get(round_id)
+        assert refreshed is not None
+        assert refreshed.status == RoundStatus.DECIDED
+
+    async def it_concludes_the_round_when_the_last_current_member_finishes():
+        club_id = PydanticObjectId()
+        book_id = PydanticObjectId()
+        first_finisher, last_finisher = PydanticObjectId(), PydanticObjectId()
+        round_ = await _decided_round(club_id, book_id)
+        round_id = PydanticObjectId(round_.id)
+        current_member_ids = {first_finisher, last_finisher}
+        await repo.record_completion(club_id, round_id, book_id, first_finisher, datetime.now(UTC), current_member_ids)
+
+        result = await repo.record_completion(
+            club_id,
+            round_id,
+            book_id,
+            last_finisher,
+            datetime.now(UTC),
+            current_member_ids,
+        )
+
+        assert result.is_new is True
+        assert result.round_concluded is True
+        refreshed = await RoundModel.get(round_id)
+        assert refreshed is not None
+        assert refreshed.status == RoundStatus.CONCLUDED
+
+    async def it_ignores_members_who_left_when_evaluating_auto_close():
+        club_id = PydanticObjectId()
+        book_id = PydanticObjectId()
+        remaining_member = PydanticObjectId()
+        former_member = PydanticObjectId()
+        round_ = await _decided_round(club_id, book_id)
+        round_id = PydanticObjectId(round_.id)
+        await RoundCompletionFactory.create_async(
+            club_id=club_id,
+            round_id=round_id,
+            book_id=book_id,
+            user_id=former_member,
+        )
+
+        result = await repo.record_completion(
+            club_id,
+            round_id,
+            book_id,
+            remaining_member,
+            datetime.now(UTC),
+            {remaining_member},
+        )
+
+        assert result.round_concluded is True
+        refreshed = await RoundModel.get(round_id)
+        assert refreshed is not None
+        assert refreshed.status == RoundStatus.CONCLUDED
+
+    async def it_is_idempotent_on_replay():
+        club_id = PydanticObjectId()
+        book_id = PydanticObjectId()
+        finisher, still_reading = PydanticObjectId(), PydanticObjectId()
+        round_ = await _decided_round(club_id, book_id)
+        round_id = PydanticObjectId(round_.id)
+        current_member_ids = {finisher, still_reading}
+        await repo.record_completion(club_id, round_id, book_id, finisher, datetime.now(UTC), current_member_ids)
+
+        result = await repo.record_completion(
+            club_id,
+            round_id,
+            book_id,
+            finisher,
+            datetime.now(UTC),
+            current_member_ids,
+        )
+
+        assert result.is_new is False
+        assert result.round_concluded is False
+        assert await repo.find_user_ids_by_round_id(round_id) == {finisher}
+
+    async def it_does_not_conclude_when_the_round_already_left_decided_before_the_lock_write():
+        club_id = PydanticObjectId()
+        book_id = PydanticObjectId()
+        finisher = PydanticObjectId()
+        round_ = await _decided_round(club_id, book_id)
+        round_id = PydanticObjectId(round_.id)
+        round_.status = RoundStatus.CONCLUDED
+        await round_.save()
+
+        result = await repo.record_completion(club_id, round_id, book_id, finisher, datetime.now(UTC), {finisher})
+
+        assert result.is_new is True
+        assert result.round_concluded is False
+        refreshed = await RoundModel.get(round_id)
+        assert refreshed is not None
+        assert refreshed.last_completed_by is None

@@ -1,6 +1,6 @@
 import base64
+import functools
 import hashlib
-import hmac
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any
 import bcrypt
 import jwt
 from beanie import PydanticObjectId
+from bson.errors import InvalidId
+from itsdangerous import BadData, URLSafeSerializer
 from pydantic import SecretStr
 
 from canterlot.config import get_settings
@@ -19,9 +21,9 @@ if TYPE_CHECKING:
     from canterlot.emails import EmailCategory
     from canterlot.types import SecretVerificationCode
 
-ACTION_LINK_TOKEN_BYTE_LENGTH: int = 18  # 12 (user) + 6 (code)
-TRUNCATED_HMAC_BYTES: int = 10
-OBJECT_ID_BYTES: int = 12
+_UNSUBSCRIBE_SALT = "email-unsubscribe"
+_ACTION_LINK_SALT = "email-action-link"
+_DIGEST_METHOD = functools.partial(hashlib.blake2s, digest_size=10)
 
 
 class UnsubscribeScope(IntEnum):
@@ -112,134 +114,70 @@ def generate_secure_code() -> "SecretVerificationCode":
     return secret_code_adapter.validate_python(raw_code)
 
 
-def _base64_encode(data: bytes) -> str:
-    """Encodes binary bytes into an unpadded URL-safe Base64 string."""
-    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
+def _unsubscribe_serializer() -> URLSafeSerializer:
+    secret_key = get_settings().auth.hmac_secret_key.get_secret_value()
+    return URLSafeSerializer(secret_key, salt=_UNSUBSCRIBE_SALT, signer_kwargs={"digest_method": _DIGEST_METHOD})
 
 
-def _base64_decode(token: str) -> bytes:
-    """Decodes an unpadded URL-safe Base64 string into binary bytes."""
-    try:
-        padded_token = token + "=" * (-len(token) % 4)
-        return base64.urlsafe_b64decode(padded_token)
-    except Exception:
-        raise TokenMalformedError("The token is corrupt, malformed, or altered.") from None
+def _action_link_serializer() -> URLSafeSerializer:
+    secret_key = get_settings().auth.hmac_secret_key.get_secret_value()
+    return URLSafeSerializer(secret_key, salt=_ACTION_LINK_SALT, signer_kwargs={"digest_method": _DIGEST_METHOD})
+
+
+def _pack_id(object_id: PydanticObjectId) -> str:
+    return base64.urlsafe_b64encode(object_id.binary).decode("ascii")
+
+
+def _unpack_id(packed: str) -> PydanticObjectId:
+    return PydanticObjectId(base64.urlsafe_b64decode(packed))
 
 
 def encode_club_unsubscribe_token(user_id: PydanticObjectId, club_id: PydanticObjectId) -> str:
-    secret_key = get_settings().auth.hmac_secret_key.get_secret_value()
-
-    tag = bytes([UnsubscribeScope.CLUB])
-    payload = tag + user_id.binary + club_id.binary
-    full_hmac = hmac.new(secret_key, payload, hashlib.sha256).digest()
-    sig_bytes = full_hmac[:TRUNCATED_HMAC_BYTES]
-
-    return _base64_encode(payload + sig_bytes)
+    return _unsubscribe_serializer().dumps(f"{UnsubscribeScope.CLUB.value}:{_pack_id(user_id)}:{_pack_id(club_id)}")
 
 
 def encode_category_unsubscribe_token(user_id: PydanticObjectId, category: "EmailCategory") -> str:
-    secret_key = get_settings().auth.hmac_secret_key.get_secret_value()
+    from canterlot.emails import EmailCategory
 
-    category_bytes = category.value.encode("utf-8")
-    tag = bytes([UnsubscribeScope.CATEGORY])
-    category_len = bytes([len(category_bytes)])
-
-    payload = tag + user_id.binary + category_len + category_bytes
-    full_hmac = hmac.new(secret_key, payload, hashlib.sha256).digest()
-    sig_bytes = full_hmac[:TRUNCATED_HMAC_BYTES]
-
-    return _base64_encode(payload + sig_bytes)
+    ordinal = list(EmailCategory).index(category)
+    return _unsubscribe_serializer().dumps(f"{UnsubscribeScope.CATEGORY.value}:{_pack_id(user_id)}:{ordinal}")
 
 
 def decode_unsubscribe_token(token: str) -> UnsubscribeTokenData:
-    secret_key = get_settings().auth.hmac_secret_key.get_secret_value()
-    token_bytes = _base64_decode(token)
-
-    min_length = 1 + OBJECT_ID_BYTES + TRUNCATED_HMAC_BYTES
-    if len(token_bytes) < min_length:
-        raise TokenMalformedError("The token is corrupt, malformed, or altered.")
-
-    scope_byte = token_bytes[0]
+    from canterlot.emails import EmailCategory
 
     try:
-        scope = UnsubscribeScope(scope_byte)
-    except ValueError:
-        raise TokenMalformedError("The token is corrupt, malformed, or altered.") from None
+        scope_str, user_id, third = _unsubscribe_serializer().loads(token).split(":")
+        scope = UnsubscribeScope(int(scope_str))
 
-    if scope == UnsubscribeScope.CLUB:
-        expected_len = 1 + OBJECT_ID_BYTES + OBJECT_ID_BYTES + TRUNCATED_HMAC_BYTES
-        if len(token_bytes) != expected_len:
-            raise TokenMalformedError("The token is corrupt, malformed, or altered.")
-
-        payload = token_bytes[: 1 + OBJECT_ID_BYTES + OBJECT_ID_BYTES]
-        provided_sig = token_bytes[len(payload) :]
-
-        expected_hmac = hmac.new(secret_key, payload, hashlib.sha256).digest()
-        if not hmac.compare_digest(provided_sig, expected_hmac[:TRUNCATED_HMAC_BYTES]):
-            raise TokenMalformedError("The token is corrupt, malformed, or altered.")
-
-        user_bytes = payload[1 : 1 + OBJECT_ID_BYTES]
-        club_bytes = payload[1 + OBJECT_ID_BYTES :]
+        if scope == UnsubscribeScope.CLUB:
+            return UnsubscribeTokenData(
+                scope=scope,
+                user_id=_unpack_id(user_id),
+                club_id=_unpack_id(third),
+            )
 
         return UnsubscribeTokenData(
             scope=scope,
-            user_id=PydanticObjectId(user_bytes),
-            club_id=PydanticObjectId(club_bytes),
+            user_id=_unpack_id(user_id),
+            category=list(EmailCategory)[int(third)],
         )
-
-    # scope == UnsubscribeScope.CATEGORY
-    cat_len_index = 1 + OBJECT_ID_BYTES
-    category_len = token_bytes[cat_len_index]
-    payload_len = cat_len_index + 1 + category_len
-    expected_len = payload_len + TRUNCATED_HMAC_BYTES
-
-    if len(token_bytes) != expected_len:
-        raise TokenMalformedError("The token is corrupt, malformed, or altered.")
-
-    payload = token_bytes[:payload_len]
-    provided_sig = token_bytes[payload_len:]
-
-    expected_hmac = hmac.new(secret_key, payload, hashlib.sha256).digest()
-    if not hmac.compare_digest(provided_sig, expected_hmac[:TRUNCATED_HMAC_BYTES]):
-        raise TokenMalformedError("The token is corrupt, malformed, or altered.")
-
-    user_bytes = payload[1:cat_len_index]
-    category_str = payload[cat_len_index + 1 :].decode("utf-8")
-
-    try:
-        from canterlot.emails import EmailCategory
-
-        category = EmailCategory(category_str)
-    except ValueError:
+    except (BadData, ValueError, TypeError, IndexError, InvalidId):
         raise TokenMalformedError("The token is corrupt, malformed, or altered.") from None
-
-    return UnsubscribeTokenData(
-        scope=scope,
-        user_id=PydanticObjectId(user_bytes),
-        category=category,
-    )
 
 
 def encode_action_link_token(user_id: PydanticObjectId, code: "SecretVerificationCode") -> str:
-    code_bytes = code.get_secret_value().encode("ascii")
-    payload = user_id.binary + code_bytes
-    return _base64_encode(payload)
+    return _action_link_serializer().dumps(f"{_pack_id(user_id)}:{code.get_secret_value()}")
 
 
 def decode_action_link_token(token: str) -> ActionLinkTokenData:
     from canterlot.types import secret_code_adapter
 
-    token_bytes = _base64_decode(token)
-
-    if len(token_bytes) != ACTION_LINK_TOKEN_BYTE_LENGTH:
-        raise TokenMalformedError("The token is corrupt, malformed, or altered.")
-
-    user_bytes = token_bytes[:OBJECT_ID_BYTES]
-    code_str = token_bytes[OBJECT_ID_BYTES:ACTION_LINK_TOKEN_BYTE_LENGTH].decode("ascii")
-
-    validated_code = secret_code_adapter.validate_python(code_str)
-
-    return ActionLinkTokenData(
-        user_id=PydanticObjectId(user_bytes),
-        code=validated_code,
-    )
+    try:
+        user_id, raw_code = _action_link_serializer().loads(token).split(":")
+        return ActionLinkTokenData(
+            user_id=_unpack_id(user_id),
+            code=secret_code_adapter.validate_python(raw_code),
+        )
+    except (BadData, ValueError, TypeError, InvalidId):
+        raise TokenMalformedError("The token is corrupt, malformed, or altered.") from None

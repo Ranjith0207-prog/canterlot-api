@@ -58,7 +58,30 @@ jobs:
       - name: Execute Quality Verification Gates
         if: steps.cache-check.outputs.cache-hit != 'true'
         run: |
-          just ci
+          set -o pipefail
+          just ci 2>&1 | tee quality-ci.log
+
+      - name: Report Quality Gate Outcome
+        if: steps.cache-check.outputs.cache-hit != 'true' && always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            COVERAGE=$(uv run python -c "import json; print(json.load(open('coverage.json'))['totals']['percent_covered_display'])")
+            echo "Quality gate passed, coverage: ${COVERAGE}%." >> "$GITHUB_STEP_SUMMARY"
+          elif [ -f quality-ci.log ]; then
+            {
+              echo "Quality gate failed."
+              echo ""
+              echo "<details><summary>Error output</summary>"
+              echo ""
+              echo '```'
+              uv run python -m tools.ci_summary quality-ci.log
+              echo '```'
+              echo ""
+              echo "</details>"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Quality gate failed before producing output, see the job log above." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Commit Quality Gate Cache Marker
         if: steps.cache-check.outputs.cache-hit != 'true'

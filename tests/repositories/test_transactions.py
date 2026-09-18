@@ -23,7 +23,7 @@ class _Conflict(TransactionError):
 
 
 class _SampleRepository:
-    @transactional(ClubModel)
+    @transactional
     async def create_two_clubs(
         self,
         session: AsyncClientSession,
@@ -36,12 +36,12 @@ class _SampleRepository:
         await club_b.insert(session=session)
         return [club_a, club_b]
 
-    @transactional(ClubModel)
+    @transactional
     async def insert_then_raise(self, session: AsyncClientSession, slug: str) -> None:
         await ClubModel(name="Rolled Back", slug=slug).insert(session=session)
         raise _Boom("unhandled")
 
-    @transactional_or_false(ClubModel)
+    @transactional_or_false
     async def rename_or_conflict(
         self,
         session: AsyncClientSession,
@@ -54,11 +54,11 @@ class _SampleRepository:
         club.slug = new_slug
         await club.save(session=session)
 
-    @transactional_or_false(ClubModel)
+    @transactional_or_false
     async def raise_unrelated_bool(self, _session: AsyncClientSession) -> None:
         raise _Boom("unhandled")
 
-    @transactional_or_none(ClubModel)
+    @transactional_or_none
     async def rename_or_conflict_returning(
         self,
         session: AsyncClientSession,
@@ -72,7 +72,7 @@ class _SampleRepository:
         await club.save(session=session)
         return club
 
-    @transactional_or_none(ClubModel)
+    @transactional_or_none
     async def raise_unrelated_optional(self, _session: AsyncClientSession) -> ClubModel:
         raise _Boom("unhandled")
 

@@ -7,7 +7,7 @@ from .error import ErrorCode, ErrorDetail, ErrorResponseModel
 from .invite import InviteModel
 from .read_book import RatingStats, ReadBookModel
 from .round import CandidatePoolEntry, DeadlineDuration, RoundModel
-from .round_completion import RoundCompletionModel
+from .round_completion import CompletionResult, RoundCompletionModel
 from .user import LinkedProviderSchema, UserModel
 from .verification import VerificationCodeModel
 
@@ -30,6 +30,7 @@ __all__ = [
     "CatalogEntryModel",
     "ClubMembershipModel",
     "ClubModel",
+    "CompletionResult",
     "DeadlineDuration",
     "ErrorCode",
     "ErrorDetail",
