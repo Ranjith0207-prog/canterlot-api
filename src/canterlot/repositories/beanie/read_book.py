@@ -1,4 +1,3 @@
-
 from beanie import PydanticObjectId
 from beanie.operators import In, Set
 
@@ -89,9 +88,7 @@ class BeanieReadBookRepository(ReadBookRepository):
                 In(ReadBookModel.book_id, book_ids),
                 In(ReadBookModel.user_id, user_ids),
             )
-            .aggregate(
-                [{"$group": {"_id": "$book_id", "count": {"$sum": 1}}}]
-            )
+            .aggregate([{"$group": {"_id": "$book_id", "count": {"$sum": 1}}}])
             .to_list()
         )
 
@@ -107,18 +104,9 @@ class BeanieReadBookRepository(ReadBookRepository):
         query = ReadBookModel.find(ReadBookModel.user_id == user_id)
         total_items = await query.count()
 
-        sort_field = (
-            "-read_at"
-            if sort_direction == SortDirection.DESC
-            else "+read_at"
-        )
+        sort_field = "-read_at" if sort_direction == SortDirection.DESC else "+read_at"
 
-        items = (
-            await query.sort(sort_field)
-            .skip((page - 1) * limit)
-            .limit(limit)
-            .to_list()
-        )
+        items = await query.sort(sort_field).skip((page - 1) * limit).limit(limit).to_list()
 
         return Page(
             items=items,
